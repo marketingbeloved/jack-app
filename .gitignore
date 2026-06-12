@@ -26,3 +26,5 @@ assets/avatars/dina.*
 brand_data/
 cache/competitors.json
 cache/socials.json
+
+.streamlit/config.toml
