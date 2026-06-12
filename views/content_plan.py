@@ -54,7 +54,6 @@ def _db_avatar(owner: str) -> str:
     """Avatar data-URI stored in Supabase (rows __avatar_vika__ / __avatar_dina__)."""
     global _AVATAR_DB_LOADED
     if not _AVATAR_DB_LOADED:
-        _AVATAR_DB_LOADED = True
         try:
             from models import plan_briefs
             rows = plan_briefs.load_all()
@@ -62,6 +61,8 @@ def _db_avatar(owner: str) -> str:
                 uri = (rows.get(f"__avatar_{o}__") or {}).get("b64", "")
                 if uri:
                     _AVATAR_DB_CACHE[o] = uri
+            if _AVATAR_DB_CACHE:  # stop retrying only once we actually got them
+                _AVATAR_DB_LOADED = True
         except Exception:
             pass
     return _AVATAR_DB_CACHE.get(owner, "")
