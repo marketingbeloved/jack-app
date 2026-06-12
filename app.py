@@ -23,7 +23,23 @@ inject_styles()
 from utils.auth import require_login  # noqa: E402
 require_login()  # shared-password gate — blocks until the team password is entered
 
-from views import dashboard, content_plan, jack_workspace, content_factory, products_library  # noqa: E402
+# Defensive imports — a view that can't load in the cloud (e.g. Content Factory needs
+# local GeeLark/Telegram) must NOT crash the whole app. Broken views are skipped.
+PAGES: dict = {}
+
+
+def _register(label: str, module_name: str) -> None:
+    try:
+        mod = __import__(f"views.{module_name}", fromlist=["render"])
+        PAGES[label] = mod.render
+    except Exception:  # noqa: BLE001 — view unavailable in this environment, skip it
+        pass
+
+
+_register("📅 Content Plan", "content_plan")
+_register("🐾 Jack Workspace", "jack_workspace")
+_register("📊 Dashboard", "dashboard")
+_register("🏭 Content Factory", "content_factory")
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -31,42 +47,28 @@ with st.sidebar:
     st.caption("SMM Hub · Content Director")
     st.divider()
 
-    # Brand switcher
-    brand = st.selectbox(
-        "Brand",
-        options=["BelovedPets", "Tobydic"],
-        index=0,
-    )
+    brand = st.selectbox("Brand", options=["BelovedPets", "Tobydic"], index=0)
     st.session_state["brand"] = brand
 
     st.divider()
 
-    # Navigation
     page = st.radio(
         "Section",
-        options=[
-            "📊 Dashboard",
-            "📅 Content Plan",
-            "🐾 Jack Workspace",
-            "🏭 Content Factory",
-        ],
+        options=list(PAGES.keys()),
         index=0,
         label_visibility="collapsed",
-    )
+    ) if PAGES else None
 
     st.divider()
     st.caption("Team:")
     st.markdown("- Darya · admin\n- Dina · video creator\n- Vika · graphic designer\n- Tanya · TOBYDIC lead")
 
-    st.divider()
-    st.caption("Status: 🚧 MVP in progress")
-
 # ─── Main content ───────────────────────────────────────────────────────────
-if page == "📊 Dashboard":
-    dashboard.render()
-elif page == "📅 Content Plan":
-    content_plan.render()
-elif page == "🐾 Jack Workspace":
-    jack_workspace.render()
-elif page == "🏭 Content Factory":
-    content_factory.render()
+if page and page in PAGES:
+    try:
+        PAGES[page]()
+    except Exception as e:  # noqa: BLE001
+        st.error("Не удалось открыть раздел. Попробуй другой раздел или обнови страницу.")
+        st.caption(f"({type(e).__name__})")
+elif not PAGES:
+    st.error("Разделы не загрузились. Обнови страницу.")
