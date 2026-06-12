@@ -41,7 +41,30 @@ def _avatar_src(owner: str) -> str:
             uri = f"data:image/{mime};base64," + base64.b64encode(f.read_bytes()).decode()
             _AVATAR_CACHE[key] = uri
             return uri
-    return ""
+    # No local file (e.g. in the cloud) → load the photo from Supabase (kept private,
+    # NOT in the public repo). Cached once per process.
+    return _db_avatar(owner)
+
+
+_AVATAR_DB_CACHE: dict = {}
+_AVATAR_DB_LOADED = False
+
+
+def _db_avatar(owner: str) -> str:
+    """Avatar data-URI stored in Supabase (rows __avatar_vika__ / __avatar_dina__)."""
+    global _AVATAR_DB_LOADED
+    if not _AVATAR_DB_LOADED:
+        _AVATAR_DB_LOADED = True
+        try:
+            from models import plan_briefs
+            rows = plan_briefs.load_all()
+            for o in ("vika", "dina"):
+                uri = (rows.get(f"__avatar_{o}__") or {}).get("b64", "")
+                if uri:
+                    _AVATAR_DB_CACHE[o] = uri
+        except Exception:
+            pass
+    return _AVATAR_DB_CACHE.get(owner, "")
 
 
 def _avatar_html(owner: str) -> str:
