@@ -14,6 +14,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+def _render_logo() -> None:
+    """Beloved Pets round logo, centered in the sidebar header."""
+    import base64
+    from pathlib import Path
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        p = Path(__file__).resolve().parent / "assets" / f"logo.{ext}"
+        if p.exists():
+            mime = "jpeg" if ext in ("jpg", "jpeg") else ext
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            st.markdown(
+                f'<div style="text-align:center; margin:10px 0 4px 0;">'
+                f'<img src="data:image/{mime};base64,{b64}" '
+                f'style="width:120px; height:120px; border-radius:50%; '
+                f'box-shadow:0 6px 22px rgba(0,0,0,0.28);"></div>',
+                unsafe_allow_html=True,
+            )
+            return
+
+
 def _register(pages: dict, label: str, module_name: str) -> None:
     """Import a view defensively — a view that can't load in this env is skipped, not fatal."""
     try:
@@ -39,6 +58,7 @@ def _run() -> None:
     with st.sidebar:
         st.markdown("## 🐾 Jack")
         st.caption("SMM Hub · Content Director")
+        _render_logo()
         st.divider()
         st.session_state["brand"] = st.selectbox("Brand", ["BelovedPets", "Tobydic"], index=0)
         st.divider()
