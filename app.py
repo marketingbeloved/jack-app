@@ -1,11 +1,8 @@
 """Jack Web App — unified content hub for Beloved Pets.
 
-Run:
-    cd ~/Databases/jack-app
-    source .venv/bin/activate
-    streamlit run app.py
-
-Opens at http://localhost:8501
+Run locally:
+    cd ~/Databases/jack-app && source .venv/bin/activate && streamlit run app.py
+Cloud: deployed on Streamlit Community Cloud (read-витрина 24/7).
 """
 
 import streamlit as st
@@ -17,58 +14,57 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from utils.styles import inject as inject_styles  # noqa: E402
-inject_styles()
-
-from utils.auth import require_login  # noqa: E402
-require_login()  # shared-password gate — blocks until the team password is entered
-
-# Defensive imports — a view that can't load in the cloud (e.g. Content Factory needs
-# local GeeLark/Telegram) must NOT crash the whole app. Broken views are skipped.
-PAGES: dict = {}
-
-
-def _register(label: str, module_name: str) -> None:
+def _register(pages: dict, label: str, module_name: str) -> None:
+    """Import a view defensively — a view that can't load in this env is skipped, not fatal."""
     try:
         mod = __import__(f"views.{module_name}", fromlist=["render"])
-        PAGES[label] = mod.render
-    except Exception:  # noqa: BLE001 — view unavailable in this environment, skip it
+        pages[label] = mod.render
+    except Exception:  # noqa: BLE001
         pass
 
 
-_register("📅 Content Plan", "content_plan")
-_register("🐾 Jack Workspace", "jack_workspace")
-_register("📊 Dashboard", "dashboard")
-_register("🏭 Content Factory", "content_factory")
+def _run() -> None:
+    from utils.styles import inject as inject_styles
+    from utils.auth import require_login
 
-# ─── Sidebar ─────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## 🐾 Jack")
-    st.caption("SMM Hub · Content Director")
-    st.divider()
+    inject_styles()
+    require_login()  # shared-password gate (st.stop() until correct)
 
-    brand = st.selectbox("Brand", options=["BelovedPets", "Tobydic"], index=0)
-    st.session_state["brand"] = brand
+    pages: dict = {}
+    _register(pages, "📅 Content Plan", "content_plan")
+    _register(pages, "🐾 Jack Workspace", "jack_workspace")
+    _register(pages, "📊 Dashboard", "dashboard")
+    _register(pages, "🏭 Content Factory", "content_factory")
 
-    st.divider()
+    with st.sidebar:
+        st.markdown("## 🐾 Jack")
+        st.caption("SMM Hub · Content Director")
+        st.divider()
+        st.session_state["brand"] = st.selectbox("Brand", ["BelovedPets", "Tobydic"], index=0)
+        st.divider()
+        page = st.radio("Section", list(pages.keys()), index=0,
+                        label_visibility="collapsed") if pages else None
+        st.divider()
+        st.caption("Team:")
+        st.markdown("- Darya · admin\n- Dina · video\n- Vika · graphics\n- Tanya · TOBYDIC")
 
-    page = st.radio(
-        "Section",
-        options=list(PAGES.keys()),
-        index=0,
-        label_visibility="collapsed",
-    ) if PAGES else None
+    if page and page in pages:
+        try:
+            pages[page]()
+        except Exception as e:  # noqa: BLE001
+            st.error("Не удалось открыть раздел. Попробуй другой или обнови страницу.")
+            st.caption(f"({type(e).__name__})")
+    elif not pages:
+        st.error("Разделы не загрузились.")
 
-    st.divider()
-    st.caption("Team:")
-    st.markdown("- Darya · admin\n- Dina · video creator\n- Vika · graphic designer\n- Tanya · TOBYDIC lead")
 
-# ─── Main content ───────────────────────────────────────────────────────────
-if page and page in PAGES:
-    try:
-        PAGES[page]()
-    except Exception as e:  # noqa: BLE001
-        st.error("Не удалось открыть раздел. Попробуй другой раздел или обнови страницу.")
-        st.caption(f"({type(e).__name__})")
-elif not PAGES:
-    st.error("Разделы не загрузились. Обнови страницу.")
+# Show the real error ON SCREEN (instead of Streamlit's generic "Oh no") so it can be
+# screenshotted and fixed. Streamlit's own control-flow exceptions are re-raised.
+try:
+    _run()
+except Exception as e:  # noqa: BLE001
+    if type(e).__name__ in ("StopException", "RerunException", "RerunData"):
+        raise
+    import traceback
+    st.error("⚠️ Ошибка запуска приложения — пришли этот текст:")
+    st.code(traceback.format_exc())
