@@ -345,18 +345,39 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     if clickable:
         st.markdown("🔗 " + clickable)
 
+    # Что Дарья хочет от поста — Джек пишет ТЗ под это (а не вслепую по одной теме).
+    wish = st.text_input(
+        "✍️ Что хочешь от Вики? (необязательно)",
+        value=entry.get("wish", ""),
+        key=f"wish_{pid}",
+        placeholder="напр.: карусель 4 слайда, добавь UK-флаг, акцент на натуральность",
+    )
+
     if st.button("🐾 Джек, напиши ТЗ для Вики", key=f"gen_{pid}",
                  use_container_width=True, type="primary"):
         from models.jack_engine import brief_for_vika
         with st.spinner("🐾 Джек пишет ТЗ для Вики…"):
             txt = brief_for_vika(title=item["title"], pillar=item["pillar"],
-                                 brand=brand, market=market, link=link)
+                                 brand=brand, market=market, extra=wish, link=link)
         if txt.startswith("⚠️"):
             st.error(txt)
         else:
             plan_briefs.save(pid, txt, title=item["title"], pillar=item["pillar"],
-                             updated=_now(), link=link)
+                             updated=_now(), link=link, wish=wish)
             st.rerun()
+
+    # Поговорить с Джеком по-человечески — он уточнит/посоветует, прежде чем писать ТЗ.
+    with st.expander("💬 Обсудить с Джеком (он уточнит / посоветует)"):
+        q = st.text_input("Спроси Джека", key=f"ask_{pid}",
+                          placeholder="напр.: какой формат тут зайдёт? стоит карусель или один кадр?")
+        if st.button("🐾 Спросить", key=f"askbtn_{pid}", use_container_width=True) and q.strip():
+            from models.jack_chat import jack_chat_reply
+            ctx = f"Это пост из контент-плана: тема «{item['title']}», пиллар {item['pillar']}, рынок {market}. Дарья хочет: {wish or '(пока не сказала)'}."
+            with st.spinner("🐾 Джек думает…"):
+                reply = jack_chat_reply([], f"{ctx}\n\nВопрос: {q}", refs=link or "")
+            st.session_state[f"jack_reply_{pid}"] = reply
+        if st.session_state.get(f"jack_reply_{pid}"):
+            st.info("🐾 " + st.session_state[f"jack_reply_{pid}"])
 
     # Готовое ТЗ — рендерим как markdown (ссылки внутри кликабельны для Вики).
     saved_txt = entry.get("text", "")

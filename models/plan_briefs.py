@@ -85,11 +85,11 @@ def ensure_synced() -> int:
 
 
 def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
-         for_who: str = "vika", updated: str = "", link: str = "") -> None:
+         for_who: str = "vika", updated: str = "", link: str = "", wish: str = "") -> None:
     text = (text or "").strip()
     link = (link or "").strip()
     entry = {"text": text, "link": link, "title": title,
-             "pillar": pillar, "for": for_who, "updated": updated}
+             "pillar": pillar, "for": for_who, "updated": updated, "wish": (wish or "").strip()}
     keep = entry if (text or link) else None
     sb = _supabase()
     if sb:
