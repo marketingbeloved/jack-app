@@ -66,22 +66,29 @@ def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
     link = (link or "").strip()
     entry = {"text": text, "link": link, "title": title,
              "pillar": pillar, "for": for_who, "updated": updated}
+    keep = entry if (text or link) else None
     sb = _supabase()
     if sb:
-        if not text and not link:
+        if keep is None:
             _sb_delete(sb, post_id)
         else:
             _sb_upsert(sb, post_id, entry, updated)
-        return
-    _file_save(post_id, entry if (text or link) else None)
+    # Always mirror to the local file too — a durable backup so ТЗ never get lost
+    # if Supabase is unreachable or secrets aren't loaded for some run.
+    try:
+        _file_save(post_id, keep)
+    except Exception:
+        pass
 
 
 def delete(post_id: str) -> None:
     sb = _supabase()
     if sb:
         _sb_delete(sb, post_id)
-        return
-    _file_save(post_id, None)
+    try:
+        _file_save(post_id, None)
+    except Exception:
+        pass
 
 
 # ─── Supabase backend ────────────────────────────────────────────────────────
