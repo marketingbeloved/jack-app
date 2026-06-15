@@ -60,6 +60,30 @@ def get(post_id: str) -> dict:
     return load_all().get(post_id, {})
 
 
+def ensure_synced() -> int:
+    """Self-heal: push any locally-saved ТЗ that are MISSING from the shared cloud.
+
+    Guards against the Friday failure mode — a brief saved while Supabase was
+    unreachable / secrets weren't loaded would otherwise live only on one Mac and
+    stay invisible to the team. We only upload briefs absent in the cloud, so a
+    newer shared edit is never overwritten. Returns how many were re-synced.
+    """
+    sb = _supabase()
+    if not sb:
+        return 0
+    cloud = _sb_load_all(sb)
+    local = _file_load_all()
+    pushed = 0
+    for pid, entry in local.items():
+        if pid in cloud:
+            continue
+        if not (entry.get("text") or entry.get("link")):
+            continue
+        _sb_upsert(sb, pid, entry, entry.get("updated", ""))
+        pushed += 1
+    return pushed
+
+
 def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
          for_who: str = "vika", updated: str = "", link: str = "") -> None:
     text = (text or "").strip()

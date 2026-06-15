@@ -211,6 +211,12 @@ def render():
     )
 
     from models import plan_briefs
+    if not st.session_state.get("_briefs_synced"):
+        try:
+            plan_briefs.ensure_synced()  # re-push any local-only ТЗ to the shared cloud
+        except Exception:
+            pass
+        st.session_state["_briefs_synced"] = True
     briefs = plan_briefs.load_all()
 
     plan = PLANS_BY_BRAND.get(brand, {})
