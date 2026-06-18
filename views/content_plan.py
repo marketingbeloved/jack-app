@@ -192,12 +192,81 @@ PLANS_BY_BRAND: dict[str, dict[str, list[dict]]] = {
     "Tobydic": _PLAN_TOBYDIC,
 }
 
+# Месяцы, доступные в календаре (label → (год, месяц)).
+MONTHS = {"Июнь 2026": (2026, 6), "Июль 2026": (2026, 7)}
+
+
+# ─── Plan store (общая база) — даты/темы синхронятся у всех 4, правятся в UI ──
+def _plan_key(brand: str) -> str:
+    return f"plan_{brand.lower()}"
+
+
+def load_plan(brand: str) -> dict:
+    """Сетка плана из общей базы (Supabase). Первый раз засевается из захардкоженного
+    каркаса (чтобы июньский BelovedPets не потерялся), дальше — источник правды облако."""
+    seed = PLANS_BY_BRAND.get(brand, {})
+    try:
+        from models import shared_store
+        if shared_store.configured():
+            cloud = shared_store.get_json(_plan_key(brand), None)
+            if cloud is None:
+                if seed:
+                    shared_store.put_json(_plan_key(brand), seed)
+                return dict(seed)
+            return cloud
+    except Exception:
+        pass
+    return dict(seed)
+
+
+def _save_plan(brand: str, plan: dict) -> None:
+    try:
+        from models import shared_store
+        shared_store.put_json(_plan_key(brand), plan)
+    except Exception:
+        pass
+
+
+def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str) -> None:
+    import uuid
+    plan = load_plan(brand)
+    pid = f"{brand[:2].lower()}{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}"
+    plan.setdefault(date_key, []).append(
+        {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip()})
+    _save_plan(brand, plan)
+
+
+def delete_plan_post(brand: str, date_key: str, pid: str) -> None:
+    plan = load_plan(brand)
+    if date_key in plan:
+        plan[date_key] = [p for p in plan[date_key] if p.get("id") != pid]
+        if not plan[date_key]:
+            plan.pop(date_key, None)
+        _save_plan(brand, plan)
+
+
+def _month_weeks(year: int, month: int) -> list[date]:
+    """Список Monday-начал недель, покрывающих весь месяц."""
+    first = date(year, month, 1)
+    start = first - timedelta(days=first.weekday())  # понедельник на/до 1-го
+    nxt = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last = nxt - timedelta(days=1)
+    weeks, wk = [], start
+    while wk <= last:
+        weeks.append(wk)
+        wk += timedelta(weeks=1)
+    return weeks
+
 
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
 
-    st.markdown(f"# 📅 Контент-план · {brand} · Июнь 2026")
-    st.caption("Календарь по неделям · цвет = категория поста · жми ➕ ТЗ в ячейке, чтобы Джек написал ТЗ для Вики в коммент.")
+    month_label = st.selectbox("Месяц", list(MONTHS.keys()), index=0, key="plan_month")
+    year, month = MONTHS[month_label]
+
+    st.markdown(f"# 📅 Контент-план · {brand} · {month_label}")
+    st.caption("Календарь по неделям · цвет = категория · ➕ ТЗ в ячейке = Джек пишет ТЗ Вике. "
+               "Даты/темы добавляются внизу (➕ Добавить пост) — появляются у всей команды сразу.")
 
     st.markdown(
         f"""
@@ -219,11 +288,10 @@ def render():
         st.session_state["_briefs_synced"] = True
     briefs = plan_briefs.load_all()
 
-    plan = PLANS_BY_BRAND.get(brand, {})
+    plan = load_plan(brand)
     if not plan:
-        st.info(f"План **{brand}** на июнь ещё не заполнен. Скинь Дарье даты и темы — добавим, "
-                f"и тут появятся ячейки с кнопкой ➕ ТЗ, как у BelovedPets.")
-        return
+        st.info(f"План **{brand}** ещё пустой. Добавь даты и темы внизу — форма **«➕ Добавить пост»**. "
+                f"Появятся ячейки, и их сразу увидит вся команда (без зипов и пересылок).")
 
     st.markdown(_GRID_CSS, unsafe_allow_html=True)
 
@@ -233,11 +301,8 @@ def render():
 
     _avatar_uploader()
 
-    # ─── Calendar grid — каждая ячейка = колонка с кнопкой ➕ ТЗ ───────────────
-    # June only — Mon 1 Jun → Sun 5 Jul (5 weeks)
-    start = date(2026, 6, 1)  # Monday
-    for week_idx in range(5):
-        week_start = start + timedelta(weeks=week_idx)
+    # ─── Calendar grid — недели выбранного месяца ─────────────────────────────
+    for week_start in _month_weeks(year, month):
         cols = st.columns(7, gap="small")
         for day_offset in range(7):
             d = week_start + timedelta(days=day_offset)
@@ -249,6 +314,40 @@ def render():
     st.markdown("<br/>", unsafe_allow_html=True)
     n_comments = len([1 for e in briefs.values() if e.get("text")])
     st.caption(f"💬 {n_comments} ТЗ для Вики сохранено в этом плане")
+
+    # ─── Добавить / удалить пост в плане (синхронно у всех 4) ─────────────────
+    month_last = (date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)) - timedelta(days=1)
+    with st.expander("➕ Добавить пост в план", expanded=(not plan)):
+        st.caption("Добавляешь один раз — видят все. Без зипов и пересылок.")
+        with st.form("add_plan_post", clear_on_submit=True):
+            ac1, ac2 = st.columns(2)
+            add_date = ac1.date_input("Дата", value=date(year, month, 1),
+                                      min_value=date(year, month, 1), max_value=month_last,
+                                      key="add_plan_date")
+            add_type = ac2.selectbox("Тип (цвет ячейки)", ["engaging", "selling", "viral", "neutral"],
+                                     key="add_plan_type")
+            add_title = st.text_input("Тема поста", placeholder="напр. duck strips POV reel", key="add_plan_title")
+            add_pillar = st.text_input("Пиллар (контекст Джеку, необязательно)",
+                                       placeholder="напр. Product Highlight", key="add_plan_pillar")
+            if st.form_submit_button("Добавить", type="primary", use_container_width=True):
+                if add_title.strip():
+                    add_plan_post(brand, add_date.strftime("%d.%m"), add_title, add_type, add_pillar)
+                    st.success(f"✓ {add_date.strftime('%d.%m')} — {add_title.strip()}. Видно всей команде.")
+                    st.rerun()
+                else:
+                    st.warning("Впиши тему поста.")
+
+        # удалить ошибочный пост
+        flat = [(dk, p) for dk, posts in sorted(plan.items()) for p in posts]
+        if flat:
+            st.markdown("---")
+            labels = {f"{dk} · {p['title']}": (dk, p["id"]) for dk, p in flat}
+            to_del = st.selectbox("Удалить пост", ["—"] + list(labels.keys()), key="del_plan_sel")
+            if st.button("🗑 Удалить", key="del_plan_btn") and to_del != "—":
+                dk, pid = labels[to_del]
+                delete_plan_post(brand, dk, pid)
+                st.success("Удалено.")
+                st.rerun()
 
     # ─── Brief Jack form ─────────────────────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:24px;">🚀 Brief Jack to generate concepts</div>', unsafe_allow_html=True)
