@@ -576,10 +576,8 @@ def caption_from_media(images: list[bytes] | None = None,
     """)
 
     if vis:
-        out = gemini_vision(base_rules, vis, vis_mimes, model="gemini-2.5-pro")
-        if out and not out.startswith("⚠️"):
-            return out
-        return gemini_vision(base_rules, vis, vis_mimes)  # Flash fallback if Pro rate-limited
+        # Flash — the model the free tier actually serves (Pro is quota-locked on free).
+        return gemini_vision(base_rules, vis, vis_mimes, model="gemini-2.5-flash")
     # No visual to look at → write from the description only (still real caption).
     return smart_text(base_rules)
 

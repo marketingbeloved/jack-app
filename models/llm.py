@@ -148,11 +148,9 @@ def smart_text(prompt: str, system: str = "", timeout: int = 180) -> str:
         out = claude_api(prompt, system=system, timeout=timeout)
         if out and not out.startswith("⚠️"):
             return out
-    # Cloud, no Claude: write with the strongest FREE model (Gemini 2.5 Pro) so the
-    # shared site isn't read-only. Falls back to Flash if Pro is rate-limited.
-    out = gemini_text(prompt, system=system, model="gemini-2.5-pro", timeout=timeout)
-    if out and not out.startswith("⚠️"):
-        return out
+    # Cloud, no Claude: write with Gemini 2.5 Flash — the strongest model that the FREE
+    # tier actually serves (Pro is quota-locked to 429 on free). Free + no card, so the
+    # one shared site can write for the whole team. ANTHROPIC_MODEL/billing unlocks Pro later.
     out = gemini_text(prompt, system=system, model="gemini-2.5-flash", timeout=timeout)
     if out and not out.startswith("⚠️"):
         return out
