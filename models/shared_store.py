@@ -64,6 +64,24 @@ def get_json(key: str, default=None):
     return default
 
 
+DEFAULT_TEAM = [
+    {"name": "Darya", "role": "admin"},
+    {"name": "Dina", "role": "video"},
+    {"name": "Vika", "role": "graphics"},
+    {"name": "Tanya", "role": "TOBYDIC"},
+]
+
+
+def get_team() -> list:
+    """Team roster (shared across everyone). Editable in the sidebar."""
+    t = get_json("team", None)
+    return t if t else [dict(x) for x in DEFAULT_TEAM]
+
+
+def save_team(team: list) -> bool:
+    return put_json("team", team)
+
+
 def put_json(key: str, value) -> bool:
     """Upsert `value` under `key`. Returns True on success, False otherwise."""
     sb = _supabase()

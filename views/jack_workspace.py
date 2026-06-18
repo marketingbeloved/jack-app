@@ -113,10 +113,17 @@ def render():
                     unsafe_allow_html=True,
                 )
 
+        # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
+        from models import shared_store
+        _team_names = [m.get("name") for m in shared_store.get_team() if m.get("name")] or ["Darya", "Tanya"]
+        if st.session_state.get("ws_sender") not in _team_names:
+            st.session_state.pop("ws_sender", None)
+        sender = st.selectbox("Кто пишет", _team_names, key="ws_sender",
+                              label_visibility="collapsed")
+
         # input
         with st.form("jack_msg", clear_on_submit=True):
             user_text = st.text_area("Your task / feedback for Jack", height=80, placeholder="e.g. 'переделай UK Eye Wash рилс — слишком грустно начало', 'возьми идею Pet Honesty 2nd-dog меме для Calming Chews'", label_visibility="collapsed")
-            sender = st.selectbox("From", ["Darya", "Tanya"], index=0, label_visibility="collapsed")
             sent = st.form_submit_button("Send", type="primary", use_container_width=True)
             if sent and user_text.strip():
                 t = datetime.now().strftime("%H:%M")
