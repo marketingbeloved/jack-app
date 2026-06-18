@@ -467,6 +467,123 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
     return gemini_vision(prompt, images, mime_types)
 
 
+# ─── Captions: upload a reel video / photos → Jack writes the IG caption ────
+
+def _video_frames(video_bytes: bytes, suffix: str = ".mp4", n: int = 4) -> list[bytes]:
+    """Extract up to n evenly-spaced frames from a video → list of JPEG bytes.
+
+    Uses imageio + the bundled imageio-ffmpeg binary (no system ffmpeg needed).
+    Returns [] if the libraries or the file can't be read — caller degrades gracefully.
+    """
+    import tempfile
+    import io as _io
+    try:
+        import imageio.v2 as imageio  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+    except Exception:
+        return []
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(video_bytes)
+            tmp = f.name
+        reader = imageio.get_reader(tmp, "ffmpeg")
+        try:
+            total = reader.count_frames()
+            if not total or total < 1 or total > 10_000_000:
+                raise ValueError
+            idxs = [int(total * p) for p in (0.05, 0.35, 0.65, 0.92)][:n]
+        except Exception:
+            idxs = list(range(0, n * 15, 15))  # fallback: sample early frames
+        out: list[bytes] = []
+        for i in idxs:
+            try:
+                frame = reader.get_data(i)
+            except Exception:
+                continue
+            buf = _io.BytesIO()
+            Image.fromarray(frame).convert("RGB").save(buf, format="JPEG", quality=85)
+            out.append(buf.getvalue())
+        reader.close()
+        return out
+    except Exception:
+        return []
+    finally:
+        if tmp:
+            try:
+                Path(tmp).unlink()
+            except Exception:
+                pass
+
+
+def caption_from_media(images: list[bytes] | None = None,
+                       mime_types: list[str] | None = None,
+                       video_bytes: bytes | None = None,
+                       video_suffix: str = ".mp4",
+                       brand: str = "BelovedPets", market: str = "US",
+                       product: str = "", extra: str = "") -> str:
+    """Write an IG/TikTok caption for a finished reel/post from uploaded media.
+
+    Accepts photos and/or a video. Photos are sent to vision as-is; the video is
+    sampled into a few frames so Jack can 'see' the reel. Returns copy-ready markdown
+    (caption + hashtags + first comment). Falls back to a text-only write if there's
+    no usable visual (e.g. video frames couldn't be extracted) — using `extra` as the
+    description so Jack still produces a caption instead of failing.
+    """
+    from models.llm import gemini_vision, smart_text
+    images = list(images or [])
+    mime_types = list(mime_types or ["image/jpeg"] * len(images))
+
+    frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
+    vis = images + frames
+    vis_mimes = mime_types + ["image/jpeg"] * len(frames)
+
+    try:
+        brand_ctx = _brand_context()
+    except Exception:
+        brand_ctx = ""
+
+    what = []
+    if frames:
+        what.append(f"{len(frames)} кадра(ов) из готового рилса (по порядку: начало → конец)")
+    if images:
+        what.append(f"{len(images)} фото")
+    media_line = " + ".join(what) if what else "описание словами (медиа не разобралось)"
+
+    base_rules = textwrap.dedent(f"""\
+        Ты Джек — senior SMM-копирайтер бренда {brand} (pet supplements, рынок {market}).
+        Тебе дали готовый рилс/пост, нужно написать ПОДПИСЬ (caption) для публикации, НЕ сценарий.
+
+        Что есть: {media_line}.
+        Товар/тема: {product or '(определи сам по медиа/описанию)'}
+        Что в кадре / пожелания от Дарьи: {extra or '(нет — опиши по тому, что видишь)'}
+
+        Напиши на чистом английском, готовое к копированию:
+        1. **Caption** — 2-4 строки (~150-220 символов). Цепляющий хук в первой строке,
+           1-2 эмодзи, тёплый человеческий тон (НЕ «рекламный»), привязанный к тому, что в рилсе.
+        2. **Hashtags** — 8-12 штук: #belovedpets первым, микс ниши + бренд + рынок.
+        3. **First comment** — короткий CTA в одну фразу, с учётом рынка {market}.
+
+        COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/clinically proven.
+        Использовать: supports, may help, daily wellness, vet-formulated, holistic. Мы — supplement, NOT medicine.
+        НЕ ВЫДУМЫВАЙ цены, скидки, %25, Subscribe & Save, бесплатную доставку, пороги заказа —
+        ничего, чего нет в пожеланиях выше.
+
+        Контекст бренда:
+        {brand_ctx[:2200]}
+
+        Выдай аккуратным markdown. Без вступлений и без сценария — только подпись, хэштеги, первый коммент.
+    """)
+
+    if vis:
+        out = gemini_vision(base_rules, vis, vis_mimes, model="gemini-2.5-pro")
+        if out and not out.startswith("⚠️"):
+            return out
+        return gemini_vision(base_rules, vis, vis_mimes)  # Flash fallback if Pro rate-limited
+    # No visual to look at → write from the description only (still real caption).
+    return smart_text(base_rules)
+
+
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
 
 def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",

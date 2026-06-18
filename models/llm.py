@@ -131,12 +131,14 @@ def claude_api(prompt: str, system: str = "", timeout: int = 180) -> str:
 
 
 def smart_text(prompt: str, system: str = "", timeout: int = 180) -> str:
-    """Text generation — CLAUDE ONLY (Darya's stance: Джек пишет только на Claude).
+    """Text generation with the best brain available, so the SHARED cloud site can write.
 
-    Uses the corporate Claude Code CLI where it's available (Darya's / Tanya's Mac,
-    shared account — free, unlimited). Claude API only if a key is ever set (it isn't
-    by default). NO Gemini in generation: in the cloud (read-витрина, no Claude) this
-    returns a clear notice instead of silently writing with another model.
+    Order of preference (best quality first, transparent to the caller):
+      1. Claude Code CLI — on Darya's / Tanya's Mac (corporate subscription, free, best tone).
+      2. Claude API — only if ANTHROPIC_API_KEY is set (needs a card; off by default).
+      3. Gemini 2.5 Pro — FREE, no card, runs server-side. Powers the one shared site so
+         all 4 teammates use a single app, no local copies. Pro (not Flash) for quality.
+    Returns a clear '⚠️ …' notice only if NONE are available.
     """
     if has_claude_cli():
         out = claude(prompt, system=system, timeout=timeout)
@@ -146,8 +148,16 @@ def smart_text(prompt: str, system: str = "", timeout: int = 180) -> str:
         out = claude_api(prompt, system=system, timeout=timeout)
         if out and not out.startswith("⚠️"):
             return out
-    return ("⚠️ Генерация ТЗ — только там, где есть ваш Claude (приложение на маке у "
-            "Дарьи/Тани). Здесь, на сайте, ТЗ можно читать, но не писать.")
+    # Cloud, no Claude: write with the strongest FREE model (Gemini 2.5 Pro) so the
+    # shared site isn't read-only. Falls back to Flash if Pro is rate-limited.
+    out = gemini_text(prompt, system=system, model="gemini-2.5-pro", timeout=timeout)
+    if out and not out.startswith("⚠️"):
+        return out
+    out = gemini_text(prompt, system=system, model="gemini-2.5-flash", timeout=timeout)
+    if out and not out.startswith("⚠️"):
+        return out
+    return ("⚠️ Генерация недоступна: нет ни Claude (мак), ни ключа Gemini. "
+            "Добавь GEMINI_API_KEY в Settings → Secrets, чтобы Джек писал на сайте.")
 
 
 def claude(prompt: str, system: str = "", timeout: int = 600) -> str:

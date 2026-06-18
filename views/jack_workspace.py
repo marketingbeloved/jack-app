@@ -293,6 +293,52 @@ def render():
                 st.markdown(st.session_state["vika_text_result"])
                 st.caption("👆 Выдели и скопируй. Не то — поменяй пожелания и жми «Написать текст» снова.")
 
+        # ─── Captions: upload a finished reel video / photos → Jack writes the caption ─
+        with st.expander("✍️ Captions — залей видео/фото, Джек напишет подпись", expanded=True):
+            st.caption("Готовый рилс или фото от Дины. Залей видео и/или фото, скажи что в кадре — "
+                       "Джек посмотрит и напишет подпись для поста + хэштеги + первый коммент. Это подпись, не сценарий.")
+            with st.form("caption_media", clear_on_submit=False):
+                cap_video = st.file_uploader(
+                    "🎬 Видео рилса (необязательно)", type=["mp4", "mov", "m4v", "webm"],
+                    accept_multiple_files=False, key="caption_video",
+                )
+                cap_imgs = st.file_uploader(
+                    "🖼 Фото / кадры (необязательно, можно несколько)",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True, key="caption_imgs",
+                )
+                cc1, cc2 = st.columns(2)
+                cap_product = cc1.text_input("Товар/тема", placeholder="напр. Calming Chews")
+                cap_market = cc2.selectbox("Рынок", ["US", "UK", "CA"], index=0, key="cap_market")
+                cap_extra = st.text_area(
+                    "Что в кадре / пожелания", height=70,
+                    placeholder="напр. «собака не спит, хозяин даёт чесалку, утром бодрая — упор на спокойный сон»",
+                )
+                cap_go = st.form_submit_button("✍️ Написать подпись", type="primary", use_container_width=True)
+                if cap_go:
+                    has_media = bool(cap_video) or bool(cap_imgs)
+                    if not has_media and not cap_extra.strip():
+                        st.warning("Залей видео/фото или хотя бы опиши словами, что в рилсе.")
+                    else:
+                        from models.jack_engine import caption_from_media
+                        img_data = [f.getvalue() for f in cap_imgs] if cap_imgs else []
+                        img_mimes = [f.type or "image/jpeg" for f in cap_imgs] if cap_imgs else []
+                        vid_data = cap_video.getvalue() if cap_video else None
+                        vid_suffix = ("." + cap_video.name.rsplit(".", 1)[-1]) if cap_video and "." in cap_video.name else ".mp4"
+                        spin = "🐾 Джек смотрит рилс и пишет подпись…" if has_media else "🐾 Джек пишет подпись…"
+                        with st.spinner(spin):
+                            cap_txt = caption_from_media(
+                                images=img_data, mime_types=img_mimes,
+                                video_bytes=vid_data, video_suffix=vid_suffix,
+                                brand=brand, market=cap_market,
+                                product=cap_product.strip(), extra=cap_extra.strip(),
+                            )
+                        st.session_state["caption_media_result"] = cap_txt
+            if st.session_state.get("caption_media_result"):
+                st.markdown("---")
+                st.markdown(st.session_state["caption_media_result"])
+                st.caption("👆 Выдели и скопируй. Не то — поправь «что в кадре» и жми «Написать подпись» снова.")
+
     # ─── Tabs below — queues + context ──────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:32px;">Pipeline</div>', unsafe_allow_html=True)
     tab_appr, tab1, tab2, tab3, tab4 = st.tabs([
