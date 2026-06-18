@@ -511,7 +511,7 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
 
 # ─── Captions: upload a reel video / photos → Jack writes the IG caption ────
 
-def _video_frames(video_bytes: bytes, suffix: str = ".mp4", n: int = 4) -> list[bytes]:
+def _video_frames(video_bytes: bytes, suffix: str = ".mp4", n: int = 8) -> list[bytes]:
     """Extract up to n evenly-spaced frames from a video → list of JPEG bytes.
 
     Uses imageio + the bundled imageio-ffmpeg binary (no system ffmpeg needed).
@@ -534,9 +534,10 @@ def _video_frames(video_bytes: bytes, suffix: str = ".mp4", n: int = 4) -> list[
             total = reader.count_frames()
             if not total or total < 1 or total > 10_000_000:
                 raise ValueError
-            idxs = [int(total * p) for p in (0.05, 0.35, 0.65, 0.92)][:n]
+            # n frames spread evenly across the whole reel (start → end)
+            idxs = [int(total * (i + 0.5) / n) for i in range(n)]
         except Exception:
-            idxs = list(range(0, n * 15, 15))  # fallback: sample early frames
+            idxs = list(range(0, n * 12, 12))  # fallback: sample across early frames
         out: list[bytes] = []
         for i in idxs:
             try:
@@ -592,36 +593,59 @@ def caption_from_media(images: list[bytes] | None = None,
         what.append(f"{len(images)} фото")
     media_line = " + ".join(what) if what else "описание словами (медиа не разобралось)"
 
+    seen_block = (
+        "Перед тобой РЕАЛЬНЫЕ кадры из рилса (по порядку начало→конец). "
+        "СНАЧАЛА внимательно посмотри: что за животное, что происходит, эмоция, "
+        "сеттинг, есть ли текст на экране, где появляется продукт. Подпись ОБЯЗАНА "
+        "опираться на конкретный сюжет рилса, а не на общий товар."
+        if vis else
+        "Видео/фото разобрать не удалось — пиши по описанию ниже. Если описания мало, "
+        "честно скажи об этом одной строкой в начале."
+    )
+
     base_rules = textwrap.dedent(f"""\
-        Ты Джек — senior SMM-копирайтер бренда {brand} (pet supplements, рынок {market}).
-        Тебе дали готовый рилс/пост, нужно написать ПОДПИСЬ (caption) для публикации, НЕ сценарий.
+        Ты Джек — креативный senior SMM-копирайтер бренда {brand} (pet supplements, рынок {market}),
+        делаешь вирусные подписи на уровне топ-pet-брендов (Pet Honesty, Native Pet). Тебе дали
+        ГОТОВЫЙ рилс — напиши ПОДПИСЬ (caption) под публикацию, НЕ сценарий.
 
-        Что есть: {media_line}.
-        Товар/тема: {product or '(определи сам по медиа/описанию)'}
-        Что в кадре / пожелания от Дарьи: {extra or '(нет — опиши по тому, что видишь)'}
+        {seen_block}
 
-        Напиши на чистом английском, готовое к копированию:
-        1. **Caption** — 2-4 строки (~150-220 символов). Цепляющий хук в первой строке,
-           1-2 эмодзи, тёплый человеческий тон (НЕ «рекламный»), привязанный к тому, что в рилсе.
-        2. **Hashtags** — 8-12 штук: #belovedpets первым, микс ниши + бренд + рынок.
-        3. **First comment** — короткий CTA в одну фразу, с учётом рынка {market}.
+        Товар/тема: {product or '(определи по кадрам)'}
+        Пожелания от Дарьи: {extra or '(нет)'}
+
+        Выдай на ЖИВОМ английском, без клише и «рекламности», строго в таком формате:
+
+        **📹 Что в рилсе:** 1-2 предложения — что ты реально видишь на кадрах (это доказывает,
+        что ты посмотрел рилс, и заземляет подписи).
+
+        **✍️ 3 варианта подписи** — РАЗНЫЕ по углу, каждый цепляет с первой строки (scroll-stopper):
+        1. *Funny / POV / relatable* — юмор или POV-ситуация из рилса.
+        2. *Эмоция / storytelling* — тёплая мини-история про питомца.
+        3. *Benefit-hook* — польза продукта, но через сюжет рилса, не сухо.
+        Каждый вариант: 2-4 строки, живой хук, 1-2 эмодзи к месту, человеческий тон.
+
+        **#️⃣ Hashtags:** 10-12 штук, #belovedpets первым, микс ниши+бренд+рынок {market}.
+
+        **💬 First comment:** короткий CTA в одну фразу (учитывай рынок {market}).
 
         COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/clinically proven.
-        Использовать: supports, may help, daily wellness, vet-formulated, holistic. Мы — supplement, NOT medicine.
-        НЕ ВЫДУМЫВАЙ цены, скидки, %25, Subscribe & Save, бесплатную доставку, пороги заказа —
-        ничего, чего нет в пожеланиях выше.
+        Можно: supports, may help, daily wellness, vet-formulated, holistic. Мы — supplement, NOT medicine.
+        НЕ ВЫДУМЫВАЙ цены, скидки, %25, Subscribe & Save, доставку, пороги — ничего, чего нет в пожеланиях.
 
-        Контекст бренда:
-        {brand_ctx[:2200]}
+        Контекст бренда (тон, продукты): {brand_ctx[:2000]}
 
-        Выдай аккуратным markdown. Без вступлений и без сценария — только подпись, хэштеги, первый коммент.
+        Чистый markdown, без вступлений вроде «вот ваша подпись». Сразу с «📹 Что в рилсе».
     """)
 
     if vis:
         # Flash — the model the free tier actually serves (Pro is quota-locked on free).
         return gemini_vision(base_rules, vis, vis_mimes, model="gemini-2.5-flash")
-    # No visual to look at → write from the description only (still real caption).
-    return smart_text(base_rules)
+    # No visual → be honest if a video was uploaded but couldn't be read.
+    out = smart_text(base_rules)
+    if video_bytes and not frames:
+        out = ("⚠️ Не смог раскадрировать это видео (формат/кодек) — подпись написана по "
+               "описанию, не по картинке. Для точности добавь скриншот кадра в «Фото».\n\n" + out)
+    return out
 
 
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
