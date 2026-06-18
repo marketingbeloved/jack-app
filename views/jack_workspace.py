@@ -288,10 +288,14 @@ def render():
                                 product=img_product.strip(), extra=img_extra.strip(),
                             )
                         st.session_state["vika_text_result"] = txt
+                        st.session_state["vika_text_n"] = st.session_state.get("vika_text_n", 0) + 1
             if st.session_state.get("vika_text_result"):
                 st.markdown("---")
-                st.markdown(st.session_state["vika_text_result"])
-                st.caption("👆 Выдели и скопируй. Не то — поменяй пожелания и жми «Написать текст» снова.")
+                _vn = st.session_state.get("vika_text_n", 0)
+                st.text_area("Текст — редактируй прямо здесь и копируй",
+                             value=st.session_state["vika_text_result"],
+                             height=340, key=f"vika_text_edit_{_vn}")
+                st.caption("✏️ Можно править прямо в поле, потом выделить и скопировать.")
 
         # ─── Captions: upload a finished reel video / photos → Jack writes the caption ─
         with st.expander("✍️ Captions — залей видео/фото, Джек напишет подпись", expanded=True):
@@ -334,10 +338,15 @@ def render():
                                 product=cap_product.strip(), extra=cap_extra.strip(),
                             )
                         st.session_state["caption_media_result"] = cap_txt
+                        st.session_state["caption_media_n"] = st.session_state.get("caption_media_n", 0) + 1
             if st.session_state.get("caption_media_result"):
                 st.markdown("---")
-                st.markdown(st.session_state["caption_media_result"])
-                st.caption("👆 Выдели и скопируй. Не то — поправь «что в кадре» и жми «Написать подпись» снова.")
+                _n = st.session_state.get("caption_media_n", 0)
+                st.text_area("Подпись — редактируй прямо здесь и копируй",
+                             value=st.session_state["caption_media_result"],
+                             height=340, key=f"caption_media_edit_{_n}")
+                st.caption("✏️ Можно править текст прямо в поле, потом выделить и скопировать. "
+                           "Перегенерить — поправь «что в кадре» и жми «Написать подпись».")
 
     # ─── Tabs below — queues + context ──────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:32px;">Pipeline</div>', unsafe_allow_html=True)
