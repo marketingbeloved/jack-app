@@ -38,11 +38,21 @@ def _load_corpus_examples(n: int = 3, kind_hint: str = "", brand: str = "Beloved
         f = cache_dir / "notion_briefs_belovedpets.json"
     if not f.exists():
         f = CORPUS_FILE  # legacy fallback
-    if not f.exists():
-        return ""
-    try:
-        items = json.loads(f.read_text(encoding="utf-8"))
-    except Exception:
+    items = []
+    if f.exists():
+        try:
+            items = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            items = []
+    if not items:
+        # No local corpus (e.g. on Streamlit Cloud) → pull the shared copy from
+        # Supabase so Tobydic / BelovedPets generation stays grounded for everyone.
+        try:
+            from models import shared_store
+            items = shared_store.get_json(f"corpus_{brand.lower()}", []) or []
+        except Exception:
+            items = []
+    if not items:
         return ""
 
     hint = kind_hint.lower()
@@ -390,24 +400,56 @@ def promote_to_approve(concept: dict) -> None:
     _save([concept])
 
 
-def _save(new_concepts: list[dict]) -> None:
-    existing = load_concepts()
-    # de-dup by id, prepend new
-    seen = {c["id"] for c in new_concepts if "id" in c}
-    keep_old = [c for c in existing if c.get("id") not in seen]
-    CONCEPTS_FILE.write_text(
-        json.dumps(new_concepts + keep_old, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def load_concepts() -> list[dict]:
+def _read_local_concepts() -> list[dict]:
     if not CONCEPTS_FILE.exists():
         return []
     try:
         return json.loads(CONCEPTS_FILE.read_text(encoding="utf-8"))
     except Exception:
         return []
+
+
+def _write_concepts(items: list[dict]) -> None:
+    """Persist the full concepts list everywhere it must live:
+    the shared cloud (so Darya, Tanya and the team see the same pipeline and it
+    survives Streamlit Cloud reboots) AND a local mirror (durable backup)."""
+    try:
+        from models import shared_store
+        if shared_store.configured():
+            shared_store.put_json("concepts", items)
+    except Exception:
+        pass
+    try:
+        CONCEPTS_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_concepts() -> list[dict]:
+    """Source of truth = shared cloud when configured (keeps Darya/Tanya/team in
+    sync); otherwise the local file. Seeds the cloud from local on first run so
+    nothing already drafted disappears."""
+    try:
+        from models import shared_store
+        if shared_store.configured():
+            cloud = shared_store.get_json("concepts", None)
+            if cloud is None:  # no cloud row yet → seed from local once
+                local = _read_local_concepts()
+                if local:
+                    shared_store.put_json("concepts", local)
+                return local
+            return cloud
+    except Exception:
+        pass
+    return _read_local_concepts()
+
+
+def _save(new_concepts: list[dict]) -> None:
+    existing = load_concepts()
+    # de-dup by id, prepend new
+    seen = {c["id"] for c in new_concepts if "id" in c}
+    keep_old = [c for c in existing if c.get("id") not in seen]
+    _write_concepts(new_concepts + keep_old)
 
 
 def update_status(concept_id: str, new_status: str, note: str = "") -> None:
@@ -418,12 +460,12 @@ def update_status(concept_id: str, new_status: str, note: str = "") -> None:
             if note:
                 c["note"] = note
             break
-    CONCEPTS_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_concepts(items)
 
 
 def delete_concept(concept_id: str) -> None:
     items = [c for c in load_concepts() if c.get("id") != concept_id]
-    CONCEPTS_FILE.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_concepts(items)
 
 
 # ─── Vision: write text for Vika's finished carousel images ─────────────────

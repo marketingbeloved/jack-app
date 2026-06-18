@@ -123,7 +123,10 @@ def _sb_load_all(sb) -> dict:
         r = requests.get(f"{url}/rest/v1/plan_briefs?select=post_id,data",
                          headers=_sb_headers(key), timeout=15)
         if r.status_code == 200:
-            return {row["post_id"]: row["data"] for row in r.json() if row.get("data")}
+            # Skip '__'-namespaced rows (shared_store: corpora, concepts) — they
+            # live in the same table but are not content-plan cells.
+            return {row["post_id"]: row["data"] for row in r.json()
+                    if row.get("data") and not str(row["post_id"]).startswith("__")}
     except Exception:
         pass
     return {}
