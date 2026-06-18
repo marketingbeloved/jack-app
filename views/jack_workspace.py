@@ -114,8 +114,11 @@ def render():
                 )
 
         # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
-        from models import shared_store
-        _team_names = [m.get("name") for m in shared_store.get_team() if m.get("name")] or ["Darya", "Tanya"]
+        try:
+            from models import shared_store
+            _team_names = [m.get("name") for m in shared_store.get_team() if m.get("name")] or ["Darya", "Tanya"]
+        except Exception:
+            _team_names = ["Darya", "Tanya"]
         if st.session_state.get("ws_sender") not in _team_names:
             st.session_state.pop("ws_sender", None)
         sender = st.selectbox("Кто пишет", _team_names, key="ws_sender",

@@ -65,24 +65,28 @@ def _run() -> None:
         page = st.radio("Section", list(pages.keys()), index=0,
                         label_visibility="collapsed") if pages else None
         st.divider()
-        from models import shared_store
-        team = shared_store.get_team()
         st.caption("Team:")
-        st.markdown("\n".join(f"- {m.get('name', '')} · {m.get('role', '')}" for m in team) or "—")
-        with st.expander("✏️ Изменить команду"):
-            st.caption("Имена/роли — общие для всех. Меняешь тут — видят все.")
-            edited = st.data_editor(
-                team, num_rows="dynamic", hide_index=True, use_container_width=True,
-                key="team_editor",
-                column_config={"name": st.column_config.TextColumn("Имя"),
-                               "role": st.column_config.TextColumn("Роль")},
-            )
-            if st.button("💾 Сохранить команду", use_container_width=True):
-                clean = [{"name": str(r.get("name", "")).strip(), "role": str(r.get("role", "")).strip()}
-                         for r in edited if str(r.get("name", "")).strip()]
-                shared_store.save_team(clean)
-                st.success("Команда обновлена — у всех.")
-                st.rerun()
+        try:
+            from models import shared_store
+            team = shared_store.get_team()
+            st.markdown("\n".join(f"- {m.get('name', '')} · {m.get('role', '')}" for m in team) or "—")
+            with st.expander("✏️ Изменить команду"):
+                st.caption("Имена/роли — общие для всех. Меняешь тут — видят все.")
+                edited = st.data_editor(
+                    team, num_rows="dynamic", hide_index=True, use_container_width=True,
+                    key="team_editor",
+                    column_config={"name": st.column_config.TextColumn("Имя"),
+                                   "role": st.column_config.TextColumn("Роль")},
+                )
+                if st.button("💾 Сохранить команду", use_container_width=True):
+                    clean = [{"name": str(r.get("name", "")).strip(), "role": str(r.get("role", "")).strip()}
+                             for r in edited if str(r.get("name", "")).strip()]
+                    shared_store.save_team(clean)
+                    st.success("Команда обновлена — у всех.")
+                    st.rerun()
+        except Exception:
+            # Защита от кэша Streamlit (старый модуль в памяти до ребута) — не валим всё приложение.
+            st.markdown("- Darya · admin\n- Dina · video\n- Vika · graphics\n- Tanya · TOBYDIC")
 
     if page and page in pages:
         try:
