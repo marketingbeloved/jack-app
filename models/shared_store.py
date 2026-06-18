@@ -82,6 +82,26 @@ def save_team(team: list) -> bool:
     return put_json("team", team)
 
 
+def put_avatar(slug: str, b64_uri: str) -> bool:
+    """Сохранить фото-аватарку члена команды в общую базу (row __avatar_<slug>__.b64),
+    в том же формате, который читает content_plan._db_avatar."""
+    sb = _supabase()
+    if not sb:
+        return False
+    import requests
+    url, k = sb
+    h = _headers(k)
+    h["Prefer"] = "resolution=merge-duplicates"
+    try:
+        r = requests.post(
+            f"{url}/rest/v1/plan_briefs", headers=h, timeout=30,
+            data=json.dumps([{"post_id": f"__avatar_{slug}__", "data": {"b64": b64_uri}, "updated": ""}]),
+        )
+        return r.status_code in (200, 201, 204)
+    except Exception:
+        return False
+
+
 def put_json(key: str, value) -> bool:
     """Upsert `value` under `key`. Returns True on success, False otherwise."""
     sb = _supabase()

@@ -13,16 +13,59 @@ import streamlit as st
 _URL_RE = re.compile(r"https?://[^\s)\]]+")
 
 # ─── Команда: кто отвечает за пост (аватарка в углу ячейки) ──────────────────
+# Исполнитель выбирается ЯВНО на каждом посте (поле "owner" = slug имени), список
+# берётся из живой команды (общая база). Известным людям — фирменный цвет/инициал,
+# новым — цвет из палитры + первая буква имени.
 _AVATARS_DIR = Path(__file__).resolve().parent.parent / "assets" / "avatars"
-_OWNERS = {
-    "vika": {"name": "Вика", "initial": "В", "color": "#3D7EDB"},
-    "dina": {"name": "Дина", "initial": "Д", "color": "#D9568C"},
+_OWNER_STYLE = {
+    "vika":  {"name": "Вика",  "initial": "В", "color": "#3D7EDB"},
+    "dina":  {"name": "Дина",  "initial": "Д", "color": "#D9568C"},
+    "tanya": {"name": "Таня",  "initial": "Т", "color": "#E0902B"},
+    "darya": {"name": "Дарья", "initial": "Д", "color": "#2BB58C"},
 }
-# Вика: все «фото от блогера» + карусели 3 и 10 июня. Остальное — Дина.
+_PALETTE = ["#7A5FC2", "#2BB58C", "#C2557A", "#4F9D69", "#B5642B", "#5566C2"]
+
+# Легаси-посевы без поля owner: эти ID исторически были на Вике, остальное — Дина.
 _VIKA_IDS = {"p0206a", "p0806a", "p1606a", "p2206a", "p3006a", "p0306a", "p1006a"}
 
 
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def _team_owners() -> dict:
+    """slug→{name,initial,color} по ЖИВОЙ команде (из общей базы). Меняешь команду в
+    сайдбаре — список исполнителей на постах меняется сразу у всех."""
+    try:
+        from models import shared_store
+        team = shared_store.get_team()
+    except Exception:
+        team = []
+    owners: dict = {}
+    for i, m in enumerate(team):
+        nm = (m.get("name") or "").strip()
+        if not nm:
+            continue
+        s = _slug(nm)
+        owners[s] = dict(_OWNER_STYLE[s]) if s in _OWNER_STYLE else {
+            "name": nm, "initial": nm[0].upper(), "color": _PALETTE[i % len(_PALETTE)]}
+    return owners
+
+
+def _owner_meta(slug: str, owners: dict | None = None) -> dict:
+    """Стиль аватарки для slug: из живой команды → из фирменного словаря → серая заглушка."""
+    if owners and slug in owners:
+        return owners[slug]
+    if slug in _OWNER_STYLE:
+        return dict(_OWNER_STYLE[slug])
+    return {"name": slug.title() or "?", "initial": (slug[:1].upper() or "?"), "color": "#8A93A3"}
+
+
 def _owner_of(item: dict) -> str:
+    """Явно выбранный исполнитель; для старых постов без поля — легаси-правило."""
+    o = item.get("owner")
+    if o:
+        return o
     return "vika" if item.get("id") in _VIKA_IDS else "dina"
 
 
@@ -51,16 +94,17 @@ _AVATAR_DB_LOADED = False
 
 
 def _db_avatar(owner: str) -> str:
-    """Avatar data-URI stored in Supabase (rows __avatar_vika__ / __avatar_dina__)."""
+    """Avatar data-URI stored in Supabase (rows __avatar_<slug>__.b64) — для любого члена команды."""
     global _AVATAR_DB_LOADED
     if not _AVATAR_DB_LOADED:
         try:
             from models import plan_briefs
             rows = plan_briefs.load_all()
-            for o in ("vika", "dina"):
-                uri = (rows.get(f"__avatar_{o}__") or {}).get("b64", "")
-                if uri:
-                    _AVATAR_DB_CACHE[o] = uri
+            for pid, data in rows.items():
+                if pid.startswith("__avatar_") and pid.endswith("__"):
+                    uri = (data or {}).get("b64", "")
+                    if uri:
+                        _AVATAR_DB_CACHE[pid[len("__avatar_"):-2]] = uri
             if _AVATAR_DB_CACHE:  # stop retrying only once we actually got them
                 _AVATAR_DB_LOADED = True
         except Exception:
@@ -68,17 +112,15 @@ def _db_avatar(owner: str) -> str:
     return _AVATAR_DB_CACHE.get(owner, "")
 
 
-def _avatar_html(owner: str) -> str:
-    o = _OWNERS.get(owner)
-    if not o:
-        return ""
-    src = _avatar_src(owner)
+def _avatar_html(slug: str, owners: dict | None = None) -> str:
+    o = _owner_meta(slug, owners)
+    src = _avatar_src(slug)
     inner = (f'<img src="{src}" alt="{o["name"]}">' if src else f'<span>{o["initial"]}</span>')
     return f'<div class="avatar" title="{o["name"]}" style="background:{o["color"]};">{inner}</div>'
 
 
 def _save_avatar(owner: str, uploaded) -> None:
-    """Save an uploaded photo as the avatar for owner (one file, normalized ext)."""
+    """Save an uploaded photo as the avatar for owner: local file (Mac) + общая база (облако)."""
     _AVATARS_DIR.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "jpg", "jpeg", "webp"):
         p = _AVATARS_DIR / f"{owner}.{ext}"
@@ -86,33 +128,44 @@ def _save_avatar(owner: str, uploaded) -> None:
             p.unlink()
     name = (uploaded.name or "").lower()
     ext = "jpg" if name.endswith((".jpg", ".jpeg")) else ("webp" if name.endswith(".webp") else "png")
-    (_AVATARS_DIR / f"{owner}.{ext}").write_bytes(uploaded.getvalue())
+    raw = uploaded.getvalue()
+    (_AVATARS_DIR / f"{owner}.{ext}").write_bytes(raw)
+    # Дублируем в общую базу, чтобы фото пережило ребут облака и увидела вся команда.
+    try:
+        from models import shared_store
+        mime = "jpeg" if ext in ("jpg", "jpeg") else ext
+        uri = f"data:image/{mime};base64," + base64.b64encode(raw).decode()
+        shared_store.put_avatar(owner, uri)
+        _AVATAR_DB_CACHE[owner] = uri  # видно сразу, без повторной загрузки из базы
+    except Exception:
+        pass
 
 
-def _avatar_uploader() -> None:
-    """In-app upload of Vika/Dina photos — no Finder needed; circles become real photos."""
-    with st.expander("👤 Фото команды — поставь аватарки Вики и Дины", expanded=False):
-        st.caption("Выбери фото с компа — кружки в углу постов станут фотографиями.")
-        cols = st.columns(2)
-        for owner, col in zip(("vika", "dina"), cols):
-            o = _OWNERS[owner]
-            with col:
-                cur = _avatar_src(owner)
-                if cur:
-                    st.markdown(
-                        f'<img src="{cur}" style="width:56px;height:56px;border-radius:50%;'
-                        f'object-fit:cover;border:2px solid {o["color"]};">',
-                        unsafe_allow_html=True,
-                    )
-                up = st.file_uploader(f"Фото — {o['name']}", type=["png", "jpg", "jpeg", "webp"],
-                                      key=f"av_up_{owner}")
-                if up is not None:
-                    sig = f"{up.name}:{up.size}"
-                    if st.session_state.get(f"av_sig_{owner}") != sig:
-                        _save_avatar(owner, up)
-                        st.session_state[f"av_sig_{owner}"] = sig
-                        st.success(f"Готово — фото {o['name']} в кружках ✅")
-                        st.rerun()
+def _avatar_uploader(owners: dict) -> None:
+    """In-app upload фото для всей команды — кружки в углу постов станут фотографиями."""
+    with st.expander("👤 Фото команды — поставь аватарки", expanded=False):
+        st.caption("Выбери фото с компа для любого члена команды — кружок в углу его постов станет фотографией.")
+        members = list(owners.items())
+        for row_start in range(0, len(members), 2):
+            cols = st.columns(2)
+            for (slug, o), col in zip(members[row_start:row_start + 2], cols):
+                with col:
+                    cur = _avatar_src(slug)
+                    if cur:
+                        st.markdown(
+                            f'<img src="{cur}" style="width:56px;height:56px;border-radius:50%;'
+                            f'object-fit:cover;border:2px solid {o["color"]};">',
+                            unsafe_allow_html=True,
+                        )
+                    up = st.file_uploader(f"Фото — {o['name']}", type=["png", "jpg", "jpeg", "webp"],
+                                          key=f"av_up_{slug}")
+                    if up is not None:
+                        sig = f"{up.name}:{up.size}"
+                        if st.session_state.get(f"av_sig_{slug}") != sig:
+                            _save_avatar(slug, up)
+                            st.session_state[f"av_sig_{slug}"] = sig
+                            st.success(f"Готово — фото {o['name']} в кружках ✅")
+                            st.rerun()
 
 
 def _now() -> str:
@@ -227,13 +280,25 @@ def _save_plan(brand: str, plan: dict) -> None:
         pass
 
 
-def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str) -> None:
+def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str,
+                  owner: str = "") -> None:
     import uuid
     plan = load_plan(brand)
     pid = f"{brand[:2].lower()}{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}"
     plan.setdefault(date_key, []).append(
-        {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip()})
+        {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip(),
+         "owner": owner})
     _save_plan(brand, plan)
+
+
+def set_plan_owner(brand: str, date_key: str, pid: str, owner: str) -> None:
+    """Сменить исполнителя поста — сохраняется в общую базу, видит вся команда сразу."""
+    plan = load_plan(brand)
+    for p in plan.get(date_key, []):
+        if p.get("id") == pid:
+            p["owner"] = owner
+            _save_plan(brand, plan)
+            return
 
 
 def delete_plan_post(brand: str, date_key: str, pid: str) -> None:
@@ -299,7 +364,8 @@ def render():
     market = mc1.selectbox("Рынок для ТЗ Вики", ["UK", "US", "CA"], index=0, key="vika_market")
     st.caption("Нажми **➕ ТЗ** прямо в ячейке → Джек напишет ТЗ для Вики, оно сохранится в коммент (видят все 4). 💬 = ТЗ уже есть.")
 
-    _avatar_uploader()
+    owners = _team_owners()
+    _avatar_uploader(owners)
 
     # ─── Calendar grid — недели выбранного месяца ─────────────────────────────
     for week_start in _month_weeks(year, month):
@@ -309,7 +375,7 @@ def render():
             key = d.strftime("%d.%m")
             items = plan.get(key, [])
             with cols[day_offset]:
-                _render_cell(d, key, items, briefs, brand, market)
+                _render_cell(d, key, items, briefs, brand, market, owners)
 
     st.markdown("<br/>", unsafe_allow_html=True)
     n_comments = len([1 for e in briefs.values() if e.get("text")])
@@ -327,11 +393,18 @@ def render():
             add_type = ac2.selectbox("Тип (цвет ячейки)", ["engaging", "selling", "viral", "neutral"],
                                      key="add_plan_type")
             add_title = st.text_input("Тема поста", placeholder="напр. duck strips POV reel", key="add_plan_title")
-            add_pillar = st.text_input("Пиллар (контекст Джеку, необязательно)",
-                                       placeholder="напр. Product Highlight", key="add_plan_pillar")
+            pc1, pc2 = st.columns(2)
+            add_pillar = pc1.text_input("Пиллар (контекст Джеку, необязательно)",
+                                        placeholder="напр. Product Highlight", key="add_plan_pillar")
+            _own_slugs = list(owners.keys())
+            add_owner = pc2.selectbox(
+                "👤 Исполнитель", _own_slugs,
+                format_func=lambda s: owners.get(s, {}).get("name", s),
+                key="add_plan_owner") if _own_slugs else ""
             if st.form_submit_button("Добавить", type="primary", use_container_width=True):
                 if add_title.strip():
-                    add_plan_post(brand, add_date.strftime("%d.%m"), add_title, add_type, add_pillar)
+                    add_plan_post(brand, add_date.strftime("%d.%m"), add_title, add_type,
+                                  add_pillar, add_owner or "")
                     st.success(f"✓ {add_date.strftime('%d.%m')} — {add_title.strip()}. Видно всей команде.")
                     st.rerun()
                 else:
@@ -390,7 +463,8 @@ def render():
 WEEKDAY_RU = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str, market: str) -> None:
+def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str, market: str,
+                 owners: dict) -> None:
     """Render one calendar day as a bordered table cell: date header + theme chip(s) + ➕ ТЗ."""
     weekday = WEEKDAY_RU[d.weekday()]
     is_weekend = d.weekday() >= 5
@@ -414,7 +488,7 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
             entry = briefs.get(pid, {})
             has = bool(entry.get("text"))
             dot = "💬 " if has else ""
-            avatar = _avatar_html(_owner_of(it))
+            avatar = _avatar_html(_owner_of(it), owners)
             st.markdown(
                 f'<div class="cell-item" style="background:{c["bg"]};border-color:{c["border"]};color:{c["text"]};">'
                 f'{avatar}'
@@ -422,15 +496,30 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
                 unsafe_allow_html=True,
             )
             with st.popover("💬 ТЗ" if has else "➕ ТЗ", use_container_width=True):
-                _brief_editor(pid, it, entry, brand, market, key)
+                _brief_editor(pid, it, entry, brand, market, key, owners)
 
 
-def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, day_key: str) -> None:
+def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, day_key: str,
+                  owners: dict) -> None:
     """Generate / edit / save / delete the ТЗ for Vika for one cell (lives inside a popover)."""
     from models import plan_briefs
 
     st.markdown(f"**{day_key} · {item['title']}**")
     has = bool(entry.get("text"))
+
+    # 👤 Исполнитель поста — выбор из живой команды, сохраняется в общую базу сразу.
+    slugs = list(owners.keys())
+    cur_owner = _owner_of(item)
+    if cur_owner not in slugs:   # исполнитель уже не в команде — покажем его всё равно
+        slugs = [cur_owner] + slugs
+    sel = st.selectbox(
+        "👤 Исполнитель", slugs, index=slugs.index(cur_owner),
+        format_func=lambda s: _owner_meta(s, owners)["name"],
+        key=f"owner_{pid}",
+    )
+    if sel != cur_owner:
+        set_plan_owner(brand, day_key, pid, sel)
+        st.rerun()
 
     # Ссылка для Вики — исходник (фото блогера для ленты / референс). Джек вставит её в ТЗ.
     link = st.text_input(
