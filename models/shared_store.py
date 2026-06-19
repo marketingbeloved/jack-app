@@ -82,6 +82,29 @@ def save_team(team: list) -> bool:
     return put_json("team", team)
 
 
+def get_avatar(slug: str) -> str:
+    """Read avatar data-URI (__avatar_<slug>__.b64) DIRECTLY from Supabase.
+
+    NB: must NOT go through plan_briefs.load_all() — that helper deliberately skips
+    every '__'-namespaced row, which would hide avatars and leave only initials.
+    """
+    sb = _supabase()
+    if not sb:
+        return ""
+    import requests
+    url, k = sb
+    try:
+        r = requests.get(
+            f"{url}/rest/v1/plan_briefs?post_id=eq.__avatar_{slug}__&select=data",
+            headers=_headers(k), timeout=20,
+        )
+        if r.status_code == 200 and r.json():
+            return (r.json()[0].get("data") or {}).get("b64", "")
+    except Exception:
+        pass
+    return ""
+
+
 def put_avatar(slug: str, b64_uri: str) -> bool:
     """Сохранить фото-аватарку члена команды в общую базу (row __avatar_<slug>__.b64),
     в том же формате, который читает content_plan._db_avatar."""

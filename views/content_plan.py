@@ -90,26 +90,22 @@ def _avatar_src(owner: str) -> str:
 
 
 _AVATAR_DB_CACHE: dict = {}
-_AVATAR_DB_LOADED = False
 
 
 def _db_avatar(owner: str) -> str:
-    """Avatar data-URI stored in Supabase (rows __avatar_<slug>__.b64) — для любого члена команды."""
-    global _AVATAR_DB_LOADED
-    if not _AVATAR_DB_LOADED:
-        try:
-            from models import plan_briefs
-            rows = plan_briefs.load_all()
-            for pid, data in rows.items():
-                if pid.startswith("__avatar_") and pid.endswith("__"):
-                    uri = (data or {}).get("b64", "")
-                    if uri:
-                        _AVATAR_DB_CACHE[pid[len("__avatar_"):-2]] = uri
-            if _AVATAR_DB_CACHE:  # stop retrying only once we actually got them
-                _AVATAR_DB_LOADED = True
-        except Exception:
-            pass
-    return _AVATAR_DB_CACHE.get(owner, "")
+    """Avatar data-URI из Supabase (__avatar_<slug>__.b64) — напрямую, минуя
+    plan_briefs.load_all() (тот выбрасывает все '__'-строки и прятал бы фото).
+    Кэш по процессу, ленивая загрузка по slug."""
+    if owner in _AVATAR_DB_CACHE:
+        return _AVATAR_DB_CACHE[owner]
+    try:
+        from models import shared_store
+        uri = shared_store.get_avatar(owner)
+        if uri:
+            _AVATAR_DB_CACHE[owner] = uri
+        return uri
+    except Exception:
+        return ""
 
 
 def _avatar_html(slug: str, owners: dict | None = None) -> str:
