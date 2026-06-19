@@ -664,30 +664,66 @@ def caption_from_media(images: list[bytes] | None = None,
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
 
 def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
-                   market: str = "UK", extra: str = "", link: str = "") -> str:
-    """Write a ready-to-read graphic-design ТЗ for Vika for a single plan cell.
+                   market: str = "UK", extra: str = "", link: str = "",
+                   for_name: str = "Вика", for_role: str = "graphics") -> str:
+    """Write a ready-to-read ТЗ for ONE plan cell, addressed to the chosen executor.
 
-    Returns copy-ready markdown (concept → slide-by-slide layout → English copy to
-    typeset → brand colour notes → packshot reference). This is what lands in the
-    cell comment / Vika's sheet, mirroring how Darya used to leave a Sheets comment.
+    for_name / for_role follow the «👤 Исполнитель» selector in the cell:
+    - graphics (Вика) → static post / carousel layout brief (slides + typeset copy).
+    - video    (Дина) → short video brief (numbered scenes + timing + voiceover).
 
-    link: optional Drive/photo link Darya gives for Vika (e.g. blogger photo for the
-    feed on «фото от блогера» posts). When present, Jack must reference it in the ТЗ.
+    link: optional Drive/photo link Darya gives (e.g. blogger photo for «фото от блогера»).
+    When present, Jack must reference it in the ТЗ as the source asset.
     """
     link = (link or "").strip()
+    who = (for_name or "Вика").strip()
+    is_video = "video" in (for_role or "").lower() or "видео" in (for_role or "").lower()
+    role_desc = (
+        "видео-креатор (делает рилсы/короткие видео; на «фото от блогера» — оформляет фото-пост)"
+        if is_video else
+        "графдизайнер (делает статичные посты / карусели в Figma для Instagram)"
+    )
     link_line = (
-        f"- Ссылка от Дарьи для Вики (ИСХОДНИК — фото блогера / референс): {link}"
+        f"- Ссылка от Дарьи для {who} (ИСХОДНИК — фото блогера / референс): {link}"
         if link else "- Ссылка от Дарьи: (нет)"
     )
     link_rule = (
-        "В ТЗ ОБЯЗАТЕЛЬНО укажи эту ссылку отдельной строкой как исходник, который Вика "
+        f"В ТЗ ОБЯЗАТЕЛЬНО укажи эту ссылку отдельной строкой как исходник, который {who} "
         "берёт для поста (например для «фото от блогера» — это фото блогера для ленты). "
         "Напиши прямо: «Исходник (фото блогера): <ссылка>»."
         if link else ""
     )
+    if is_video:
+        format_block = textwrap.dedent("""\
+            Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
+
+            **Формат:** Reel / Video (≈N сек)
+            **Концепт:** 1 фраза — что это и зачем (на русском)
+            **Сцены (тайминг):**
+            - 0-3 сек — что в кадре (РУС) · overlay-текст "English" · voiceover "English"
+            - 3-7 сек — …
+            **CTA:** финальная строка / overlay (English)
+            **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон
+            **Референс / packshot:** какой файл/товар взять из Drive (назови словами)""")
+    else:
+        format_block = textwrap.dedent("""\
+            Сначала сам пойми по теме: это статичный пост (life pic / 1 кадр) или карусель (3-6 слайдов)?
+            Выбери уместный формат и напиши ТЗ КОРОТКО и по делу, как реальный коммент дизайнеру.
+
+            Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
+
+            **Формат:** Static / Carousel (N слайдов)
+            **Концепт:** 1 фраза — что это и зачем (на русском)
+            **Layout по слайдам:**
+            - Слайд 1 — что в кадре (РУС) · overlay-текст "English copy" · что выделить
+            - Слайд 2 — …
+            (для static — один пункт «Кадр»)
+            **Текст под набор (English, готовый к типсету):** заголовок + 1-2 строки бенефита
+            **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон, светлые тона
+            **Packshot / референс:** какой файл товара взять из Drive (назови словами)""")
     system = _system_prompt()
     user = textwrap.dedent(f"""\
-        Напиши ТЗ для ВИКИ (графдизайнер, делает статичные посты / карусели в Figma для Instagram).
+        Напиши ТЗ для {who.upper()} ({role_desc}).
         Это коммент к ячейке контент-плана — как Дарья раньше оставляла коммент в Google-таблице.
 
         Ячейка контент-плана:
@@ -700,20 +736,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
 
         {link_rule}
 
-        Сначала сам пойми по теме: это статичный пост (life pic / 1 кадр) или карусель (3-6 слайдов)?
-        Выбери уместный формат и напиши ТЗ КОРОТКО и по делу, как реальный коммент дизайнеру.
-
-        Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
-
-        **Формат:** Static / Carousel (N слайдов)
-        **Концепт:** 1 фраза — что это и зачем (на русском)
-        **Layout по слайдам:**
-        - Слайд 1 — что в кадре (РУС) · overlay-текст "English copy" · что выделить
-        - Слайд 2 — …
-        (для static — один пункт «Кадр»)
-        **Текст под набор (English, готовый к типсету):** заголовок + 1-2 строки бенефита
-        **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон, светлые тона
-        **Packshot / референс:** какой файл товара взять из Drive (назови словами)
+        {format_block}
 
         COMPLIANCE — строго: НЕ писать cure / treat / heal / FDA / 100% safe / guaranteed.
         Можно: supports, may help with, gentle daily care, natural, vet-formulated, holistic.

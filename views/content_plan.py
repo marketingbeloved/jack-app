@@ -17,11 +17,12 @@ _URL_RE = re.compile(r"https?://[^\s)\]]+")
 # берётся из живой команды (общая база). Известным людям — фирменный цвет/инициал,
 # новым — цвет из палитры + первая буква имени.
 _AVATARS_DIR = Path(__file__).resolve().parent.parent / "assets" / "avatars"
+# gen — имя в родительном падеже («для Вики», «от Дины»); role — для какого ТЗ (graphics/video).
 _OWNER_STYLE = {
-    "vika":  {"name": "Вика",  "initial": "В", "color": "#3D7EDB"},
-    "dina":  {"name": "Дина",  "initial": "Д", "color": "#D9568C"},
-    "tanya": {"name": "Таня",  "initial": "Т", "color": "#E0902B"},
-    "darya": {"name": "Дарья", "initial": "Д", "color": "#2BB58C"},
+    "vika":  {"name": "Вика",  "gen": "Вики",  "initial": "В", "color": "#3D7EDB", "role": "graphics"},
+    "dina":  {"name": "Дина",  "gen": "Дины",  "initial": "Д", "color": "#D9568C", "role": "video"},
+    "tanya": {"name": "Таня",  "gen": "Тани",  "initial": "Т", "color": "#E0902B", "role": "TOBYDIC"},
+    "darya": {"name": "Дарья", "gen": "Дарьи", "initial": "Д", "color": "#2BB58C", "role": "admin"},
 }
 _PALETTE = ["#7A5FC2", "#2BB58C", "#C2557A", "#4F9D69", "#B5642B", "#5566C2"]
 
@@ -47,8 +48,14 @@ def _team_owners() -> dict:
         if not nm:
             continue
         s = _slug(nm)
-        owners[s] = dict(_OWNER_STYLE[s]) if s in _OWNER_STYLE else {
-            "name": nm, "initial": nm[0].upper(), "color": _PALETTE[i % len(_PALETTE)]}
+        base = dict(_OWNER_STYLE[s]) if s in _OWNER_STYLE else {
+            "name": nm, "gen": nm, "initial": nm[0].upper(), "color": _PALETTE[i % len(_PALETTE)]}
+        # роль из живой команды важнее (Сергей может её менять), но не затираем фирменную пустой
+        if m.get("role"):
+            base["role"] = str(m["role"]).strip()
+        base.setdefault("role", "")
+        base.setdefault("gen", base["name"])
+        owners[s] = base
     return owners
 
 
@@ -58,7 +65,8 @@ def _owner_meta(slug: str, owners: dict | None = None) -> dict:
         return owners[slug]
     if slug in _OWNER_STYLE:
         return dict(_OWNER_STYLE[slug])
-    return {"name": slug.title() or "?", "initial": (slug[:1].upper() or "?"), "color": "#8A93A3"}
+    return {"name": slug.title() or "?", "gen": slug.title() or "?",
+            "initial": (slug[:1].upper() or "?"), "color": "#8A93A3", "role": ""}
 
 
 def _owner_of(item: dict) -> str:
@@ -517,9 +525,15 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         set_plan_owner(brand, day_key, pid, sel)
         st.rerun()
 
-    # Ссылка для Вики — исходник (фото блогера для ленты / референс). Джек вставит её в ТЗ.
+    # Имя выбранного исполнителя во всех подписях ниже следует за селектором.
+    _meta = _owner_meta(sel, owners)
+    who_gen = _meta.get("gen") or _meta["name"]      # родительный: «Вики» / «Дины»
+    who_name = _meta["name"]                          # именительный
+    who_role = (_meta.get("role") or "").lower()
+
+    # Ссылка-исходник (фото блогера для ленты / референс). Джек вставит её в ТЗ.
     link = st.text_input(
-        "🔗 Ссылка для Вики (фото блогера / референс)",
+        f"🔗 Ссылка для {who_gen} (фото блогера / референс)",
         value=entry.get("link", ""),
         key=f"link_{pid}",
         placeholder="вставь ссылку(и) на фото блогера — можно несколько через пробел",
@@ -531,18 +545,19 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
 
     # Что Дарья хочет от поста — Джек пишет ТЗ под это (а не вслепую по одной теме).
     wish = st.text_input(
-        "✍️ Что хочешь от Вики? (необязательно)",
+        f"✍️ Что хочешь от {who_gen}? (необязательно)",
         value=entry.get("wish", ""),
         key=f"wish_{pid}",
         placeholder="напр.: карусель 4 слайда, добавь UK-флаг, акцент на натуральность",
     )
 
-    if st.button("🐾 Джек, напиши ТЗ для Вики", key=f"gen_{pid}",
+    if st.button(f"🐾 Джек, напиши ТЗ для {who_gen}", key=f"gen_{pid}",
                  use_container_width=True, type="primary"):
         from models.jack_engine import brief_for_vika
-        with st.spinner("🐾 Джек пишет ТЗ для Вики…"):
+        with st.spinner(f"🐾 Джек пишет ТЗ для {who_gen}…"):
             txt = brief_for_vika(title=item["title"], pillar=item["pillar"],
-                                 brand=brand, market=market, extra=wish, link=link)
+                                 brand=brand, market=market, extra=wish, link=link,
+                                 for_name=who_name, for_role=who_role)
         if txt.startswith("⚠️"):
             st.error(txt)
         else:
@@ -563,18 +578,18 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         if st.session_state.get(f"jack_reply_{pid}"):
             st.info("🐾 " + st.session_state[f"jack_reply_{pid}"])
 
-    # Готовое ТЗ — рендерим как markdown (ссылки внутри кликабельны для Вики).
+    # Готовое ТЗ — рендерим как markdown (ссылки внутри кликабельны).
     saved_txt = entry.get("text", "")
     if saved_txt:
-        st.markdown("**📝 ТЗ для Вики:**")
+        st.markdown(f"**📝 ТЗ для {who_gen}:**")
         st.markdown(_linkify(saved_txt))
 
     with st.expander("✏️ Редактировать ТЗ вручную", expanded=not saved_txt):
         new = st.text_area(
-            "ТЗ для Вики",
+            f"ТЗ для {who_gen}",
             value=saved_txt,
             key=f"cmt_{pid}",
-            placeholder="нажми кнопку выше — или впиши ТЗ для Вики руками",
+            placeholder=f"нажми кнопку выше — или впиши ТЗ для {who_gen} руками",
             height=240,
             label_visibility="collapsed",
         )

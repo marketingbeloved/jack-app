@@ -244,8 +244,12 @@ def render():
                             "pillars": ["Amazon Video"] if "amazon" in user_text.lower() else [],
                             "context": ctx,
                         }
-                        # GENERATE WITHOUT SAVING — keep draft in chat session only
-                        result = generate_concepts(req, save=False)
+                        # GENERATE WITHOUT SAVING — keep draft in chat session only.
+                        # Любая ошибка → видимое сообщение Джека (а не молчаливый вечный спиннер).
+                        try:
+                            result = generate_concepts(req, save=False)
+                        except Exception as _e:  # noqa: BLE001
+                            result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
                 else:
                     # Conversational reply
                     with st.spinner("🐾 Jack думает…"):
