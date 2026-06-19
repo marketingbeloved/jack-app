@@ -103,22 +103,46 @@ def brief_has_product(text: str) -> bool:
     return any(p in text.lower() for p in PRODUCT_KEYWORDS)
 
 
+# Brief types that legitimately have NO product/SKU — don't ask «по какому товару?».
+B2B_SIGNALS = [
+    "faire", "фейр", "ритейлер", "retailer", "b2b", "оптов", "wholesale",
+    "приглашени", "invite", "дистрибьютор", "distributor", "магазин", "stockist",
+    "fb group", "facebook group", "фб групп", "сообществ", "подписчик", "follow",
+]
+
+
+def brief_needs_no_product(text: str) -> bool:
+    """True for briefs that don't revolve around a SKU (Faire/B2B invites, community
+    /follow asks, etc.) — so Jack generates instead of demanding a product."""
+    return any(s in text.lower() for s in B2B_SIGNALS)
+
+
 def looks_like_full_brief(text: str) -> bool:
     """Heuristic: does the message look like a brief ready to generate?
 
     Triggers brief mode if:
-    - Action words present ("напиши ТЗ", "сделай", "придумай") — even if vague
+    - A write-verb + a content-noun appear ("напиши скрипт", "написать сценарий",
+      "сделай пост", "придумай тз") — in ANY word order / verb form
+    - OR phrase patterns like "скрипт про/для/на", "контент про"
     - OR enough detail signals (≥3 of: product / market / format / duration)
     """
     t = text.lower()
 
-    # Strong action words — go straight to brief generation
+    # Write-verb (любая форма: напиши/написать/напишешь…) + content-noun anywhere.
+    write_verbs = ["напиш", "написа", "сдела", "придума", "набросай", "набросать",
+                   "сочини", "сгенери", "состав", "оформи"]
+    content_nouns = ["скрипт", "сценари", "тз", "пост", "caption", "подпис", "текст",
+                     "питч", "pitch", "концепт", "рилс", "reel", "видео", "карусел"]
+    has_verb = any(v in t for v in write_verbs)
+    has_noun = any(n in t for n in content_nouns)
+    if has_verb and has_noun:
+        return True
+
+    # Phrase patterns even без явного глагола рядом.
     action_triggers = [
-        "напиши тз", "напиши скрипт", "напиши пост", "напиши caption", "напиши текст",
-        "сделай тз", "сделай скрипт", "сделай пост", "сделай для",
-        "придумай тз", "придумай скрипт", "придумай идею",
-        "тз для", "тз на", "скрипт для", "скрипт на",
-        "идея для", "концепт для", "контент про", "контент для",
+        "тз для", "тз на", "тз по", "скрипт для", "скрипт на", "скрипт про", "скрипт по",
+        "сценарий для", "сценарий про", "идея для", "концепт для",
+        "контент про", "контент для", "пост про", "питч для", "pitch for",
     ]
     if any(trig in t for trig in action_triggers):
         return True

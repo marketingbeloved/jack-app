@@ -204,12 +204,14 @@ def render():
                     st.session_state["jack_mood"] = "happy"
                     st.rerun()
 
-                # Guard: vague brief with no product named → ask, don't guess a SKU
-                from models.jack_chat import brief_has_product
+                # Guard: vague brief with no product named → ask, don't guess a SKU.
+                # НО: B2B/Faire/приглашения/community-посты товара не требуют — для них не спрашиваем.
+                from models.jack_chat import brief_has_product, brief_needs_no_product
                 prior_draft = st.session_state.get("draft_concept")
                 if (
                     looks_like_full_brief(user_text)
                     and not brief_has_product(user_text)
+                    and not brief_needs_no_product(user_text)
                     and not prior_draft
                 ):
                     reply = (
