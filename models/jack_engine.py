@@ -468,6 +468,17 @@ def delete_concept(concept_id: str) -> None:
     _write_concepts(items)
 
 
+def set_concept_fields(concept_id: str, **fields) -> None:
+    """Durably set arbitrary fields on a concept (shared cloud + local mirror).
+    Used e.g. to remember that an approved reel был внесён в контент-план (plan_date)."""
+    items = load_concepts()
+    for c in items:
+        if c.get("id") == concept_id:
+            c.update(fields)
+            break
+    _write_concepts(items)
+
+
 # ─── Vision: write text for Vika's finished carousel images ─────────────────
 
 def text_for_carousel_images(images: list[bytes], mime_types: list[str],

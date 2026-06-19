@@ -15,6 +15,16 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 
+def _pillar_to_type(pillar: str) -> str:
+    """Маппинг пиллара концепта → цвет ячейки в КП (как Дарины 3 категории)."""
+    p = (pillar or "").lower()
+    if any(k in p for k in ("promo", "amazon", "faire", "discount", "product", "selling")):
+        return "selling"
+    if any(k in p for k in ("trend", "meme", "comedy", "pov", "viral")):
+        return "viral"
+    return "engaging"
+
+
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
     st.markdown(f"# 🐾 Jack Workspace · {brand}")
@@ -788,6 +798,37 @@ def _render_approve_kanban():
                 st.markdown(
                     f"**{c.get('title','—')}** · {c.get('product','—')} · {c.get('market','—')}"
                 )
+
+                # ─── Внести рилс в контент-план на выбранную дату ───────────────
+                _plan_date = c.get("plan_date")
+                if _plan_date:
+                    st.success(f"📅 В контент-плане на {_plan_date} · 🎬 Дина (видео)")
+                else:
+                    st.markdown(
+                        '<div style="font-size:0.86rem; color:#1B339E;">🐾 Джек: '
+                        'скрипт апрувлен. На какую дату ставим рилс в контент-план?</div>',
+                        unsafe_allow_html=True,
+                    )
+                    from datetime import date as _date2
+                    pc1, pc2 = st.columns([1.4, 1])
+                    plan_d = pc1.date_input(
+                        "📅 Дата в КП", value=_date2.today(),
+                        key=f"plandate_{c['id']}", label_visibility="collapsed",
+                    )
+                    if pc2.button("📅 Внести в КП", key=f"plan_{c['id']}",
+                                  use_container_width=True, type="primary"):
+                        from views import content_plan
+                        from models.jack_engine import set_concept_fields
+                        dk = plan_d.strftime("%d.%m")
+                        content_plan.add_plan_post(
+                            c.get("brand", brand), dk,
+                            c.get("title", "рилс"), _pillar_to_type(c.get("pillar", "")),
+                            c.get("pillar", ""), owner="dina",
+                        )
+                        set_concept_fields(c["id"], plan_date=dk)
+                        st.success(f"✓ Внёс «{c.get('title','рилс')}» в контент-план на {dk} (🎬 Дина). Видит вся команда.")
+                        st.rerun()
+
                 if notion_url:
                     # Already pushed to Dina
                     st.success("📄 ТЗ у Дины в Notion")
