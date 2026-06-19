@@ -134,6 +134,36 @@ def render():
         sender = st.selectbox("Кто пишет", _team_names, key="ws_sender",
                               label_visibility="collapsed")
 
+        # ─── ⚙️ Инструкции Джеку — постоянные правила «делай так-то» ──────────
+        # И Дарья, и Таня. Применяются ко ВСЕМ ответам Джека (концепты/ТЗ/чат),
+        # хранятся в общей базе → видят все, переживают ребут. Это НЕ правка кода,
+        # а управление поведением Джека словами.
+        _rules_brand = "Tobydic" if sender.lower() == "tanya" else brand
+        with st.expander(f"⚙️ Инструкции Джеку · {_rules_brand} — чему научить (действует всегда)", expanded=False):
+            st.caption("Пиши правила простым текстом — Джек будет соблюдать их в каждом ответе. "
+                       "Напр.: «всегда добавляй UK-флаг», «хук ≤ 3 сек», «не используй слово cure», "
+                       "«CTA всегда про link in bio». Видит вся команда.")
+            from models import jack_lessons
+            with st.form("add_jack_rule", clear_on_submit=True):
+                rule_txt = st.text_input("Новое правило", key="new_rule_txt",
+                                         placeholder="напр.: всегда упоминай, что это supplement, не medicine")
+                if st.form_submit_button("➕ Добавить правило", use_container_width=True) and rule_txt.strip():
+                    jack_lessons.add_rule(_rules_brand, rule_txt, author=sender)
+                    st.success("✓ Джек запомнил — применит во всех следующих ответах.")
+                    st.rerun()
+            _rules = jack_lessons.list_rules(_rules_brand)
+            if _rules:
+                st.caption(f"Активные правила ({len(_rules)}):")
+                for r in _rules:
+                    rc1, rc2 = st.columns([6, 1])
+                    _who = f" · _{r['author']}_" if r.get("author") else ""
+                    rc1.markdown(f"• {r.get('text','')}{_who}")
+                    if rc2.button("🗑", key=f"delrule_{r.get('ts')}", help="удалить правило"):
+                        jack_lessons.delete_rule(r.get("ts"))
+                        st.rerun()
+            else:
+                st.caption("Пока правил нет — Джек работает по базовым настройкам.")
+
         # input
         with st.form("jack_msg", clear_on_submit=True):
             user_text = st.text_area("Your task / feedback for Jack", height=80, placeholder="e.g. 'переделай UK Eye Wash рилс — слишком грустно начало', 'возьми идею Pet Honesty 2nd-dog меме для Calming Chews'", label_visibility="collapsed")
@@ -180,6 +210,7 @@ def render():
                             st.session_state["ws_messages"][:-1],
                             user_text + "\n\n(Drive URL detected — без Service Account я внутрь не залезу)",
                             refs_context,
+                            brand=("Tobydic" if sender.lower() == "tanya" else brand),
                         )
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
                     st.session_state["jack_mood"] = "happy"
@@ -257,6 +288,7 @@ def render():
                             st.session_state["ws_messages"][:-1],
                             user_text,
                             refs_context,
+                            brand=effective_brand,
                         )
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
                     st.session_state["jack_mood"] = "happy"

@@ -14,9 +14,14 @@ from pathlib import Path
 from models.jack_engine import _brand_context, _load_corpus_examples
 
 
-def chat_system_prompt() -> str:
+def chat_system_prompt(brand: str = "BelovedPets") -> str:
     brand_ctx = _brand_context()
-    return textwrap.dedent(f"""\
+    try:
+        from models.jack_lessons import render_rules_for_prompt
+        rules = render_rules_for_prompt(brand)
+    except Exception:
+        rules = ""
+    base = textwrap.dedent(f"""\
         You are JACK — 28, senior SMM creative for Beloved Pets and Tobydic.
         You're chatting with Darya in Telegram-style: short, warm, human.
 
@@ -50,9 +55,10 @@ def chat_system_prompt() -> str:
 
         {brand_ctx}
     """)
+    return base + rules
 
 
-def jack_chat_reply(messages: list[dict], current_input: str, refs: str = "") -> str:
+def jack_chat_reply(messages: list[dict], current_input: str, refs: str = "", brand: str = "BelovedPets") -> str:
     """Generate a conversational reply from Jack.
 
     Args:
@@ -82,7 +88,7 @@ def jack_chat_reply(messages: list[dict], current_input: str, refs: str = "") ->
     """)
 
     from models.llm import smart_text
-    out = smart_text(prompt, system=chat_system_prompt(), timeout=90)
+    out = smart_text(prompt, system=chat_system_prompt(brand), timeout=90)
     if out.startswith("⚠️"):
         return f"(Jack offline · {out[:120]})"
     return out

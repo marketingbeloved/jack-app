@@ -598,7 +598,7 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
             from models.jack_chat import jack_chat_reply
             ctx = f"Это пост из контент-плана: тема «{item['title']}», пиллар {item['pillar']}, рынок {market}. Дарья хочет: {wish or '(пока не сказала)'}."
             with st.spinner("🐾 Джек думает…"):
-                reply = jack_chat_reply([], f"{ctx}\n\nВопрос: {q}", refs=link or "")
+                reply = jack_chat_reply([], f"{ctx}\n\nВопрос: {q}", refs=link or "", brand=brand)
             st.session_state[f"jack_reply_{pid}"] = reply
         if st.session_state.get(f"jack_reply_{pid}"):
             st.info("🐾 " + st.session_state[f"jack_reply_{pid}"])

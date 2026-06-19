@@ -369,8 +369,8 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
     examples = _load_corpus_examples(n=3, kind_hint=hint, brand=brand)
     # Pull Darya's running corrections so Jack avoids repeating mistakes
     try:
-        from models.jack_lessons import render_for_prompt as _lessons
-        lessons_block = _lessons(brand=brand, max_count=15)
+        from models.jack_lessons import render_for_prompt as _lessons, render_rules_for_prompt as _rules
+        lessons_block = _rules(brand) + _lessons(brand=brand, max_count=15)
     except Exception:
         lessons_block = ""
     system = _system_prompt() + lessons_block + examples
@@ -721,7 +721,11 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
             **Текст под набор (English, готовый к типсету):** заголовок + 1-2 строки бенефита
             **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон, светлые тона
             **Packshot / референс:** какой файл товара взять из Drive (назови словами)""")
-    system = _system_prompt()
+    try:
+        from models.jack_lessons import render_rules_for_prompt as _rules
+        system = _system_prompt() + _rules(brand)
+    except Exception:
+        system = _system_prompt()
     user = textwrap.dedent(f"""\
         Напиши ТЗ для {who.upper()} ({role_desc}).
         Это коммент к ячейке контент-плана — как Дарья раньше оставляла коммент в Google-таблице.
