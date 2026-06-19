@@ -15,6 +15,37 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 
+def _signals_ready_to_write(reply: str) -> bool:
+    """Джек в чате сказал «иду писать» → это сигнал запустить генерацию по диалогу."""
+    t = (reply or "").lower()
+    return any(s in t for s in [
+        "иду писать", "иду делать", "сейчас напишу", "сейчас набросаю", "напишу сейчас",
+        "пишу рилс", "пишу скрипт", "набросаю", "погнал", "поехали",
+        "это все данные", "это всё данные", "все данные, которые мне нужны",
+        "всё, что мне нужно", "все что мне нужно",
+    ])
+
+
+def _assemble_brief_from_chat(messages: list, refs: str = "") -> str:
+    """Собрать бриф из всего диалога — исходный запрос + все уточнения Дарьи/Тани."""
+    lines = [f"- {m.get('text','')}" for m in messages[-14:]
+             if m.get("who") in ("darya", "tanya") and m.get("text")]
+    ctx = ("Собери рилс по этому диалогу — учти ВСЕ уточнения (товар/без товара, рынок, "
+           "пожелания по формату):\n" + "\n".join(lines))
+    if refs:
+        ctx += "\n\nREFERENCES:\n" + refs
+    return ctx
+
+
+def _market_from_text(text: str) -> str:
+    t = (text or "").lower()
+    if any(m in t for m in ["uk", "британ", "англи"]):
+        return "UK"
+    if any(m in t for m in ["canada", "канад", " ca "]):
+        return "CA"
+    return "US"
+
+
 def _pillar_to_type(pillar: str) -> str:
     """Маппинг пиллара концепта → цвет ячейки в КП (как Дарины 3 категории)."""
     p = (pillar or "").lower()
@@ -291,8 +322,29 @@ def render():
                             brand=effective_brand,
                         )
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
-                    st.session_state["jack_mood"] = "happy"
-                    st.rerun()
+                    # Если Джек сказал «иду писать» — это сигнал готовности: собираем бриф
+                    # из всего диалога и РЕАЛЬНО генерим (раньше он говорил «иду писать» и молчал).
+                    if _signals_ready_to_write(reply):
+                        brief_ctx = _assemble_brief_from_chat(st.session_state["ws_messages"], refs_context)
+                        all_darya = " ".join(m.get("text", "") for m in st.session_state["ws_messages"]
+                                             if m.get("who") in ("darya", "tanya"))
+                        with st.spinner(f"🐾 Jack пишет рилс для {effective_brand}…"):
+                            from models.jack_engine import generate_concepts
+                            req = {
+                                "brand": effective_brand, "n": 1,
+                                "markets": [_market_from_text(all_darya)],
+                                "products": ["см. запрос"],
+                                "pillars": ["Amazon Video"] if "amazon" in all_darya.lower() else [],
+                                "context": brief_ctx,
+                            }
+                            try:
+                                result = generate_concepts(req, save=False)
+                            except Exception as _e:  # noqa: BLE001
+                                result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
+                        # падаем в общий разбор result ниже (без rerun)
+                    else:
+                        st.session_state["jack_mood"] = "happy"
+                        st.rerun()
                 if result and "error" in result[0]:
                     reply = f"Хм, что-то не получилось — {result[0]['error']}. Давай попробуем ещё раз?"
                 elif result:
