@@ -195,6 +195,42 @@ def render():
             else:
                 st.caption("Пока правил нет — Джек работает по базовым настройкам.")
 
+        # ─── ✍️ Гарантированный запуск: написать рилс СЕЙЧАС по всему диалогу ──
+        # Чтобы Джек не зацикливался на уточнениях — Дарья/Таня в любой момент жмут
+        # кнопку, и он пишет скрипт по всему сказанному выше (не ждёт «иду писать»).
+        _said = [m for m in st.session_state.get("ws_messages", []) if m.get("who") in ("darya", "tanya")]
+        if _said and st.button("✍️ Написать рилс сейчас (по всему, что сказали выше)",
+                               use_container_width=True, key="force_write"):
+            t = datetime.now().strftime("%H:%M")
+            eff_brand = "Tobydic" if sender.lower() == "tanya" else brand
+            brief_ctx = _assemble_brief_from_chat(st.session_state["ws_messages"])
+            all_txt = " ".join(m.get("text", "") for m in _said)
+            with st.spinner(f"🐾 Jack пишет рилс для {eff_brand}…"):
+                from models.jack_engine import generate_concepts
+                req = {
+                    "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
+                    "products": ["см. запрос"],
+                    "pillars": ["Amazon Video"] if "amazon" in all_txt.lower() else [],
+                    "context": brief_ctx,
+                }
+                try:
+                    _res = generate_concepts(req, save=False)
+                except Exception as _e:  # noqa: BLE001
+                    _res = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
+            if _res and "error" in _res[0]:
+                st.session_state["ws_messages"].append(
+                    {"who": "jack", "text": f"Хм, не получилось — {_res[0]['error']}. Попробуй ещё раз.", "time": t})
+            elif _res:
+                _c = _res[0]
+                st.session_state["draft_concept"] = _c
+                _scenes = "\n".join(_c.get("scenes", [])) or "(сцен нет)"
+                st.session_state["ws_messages"].append({"who": "jack", "text": (
+                    f"Окей, набросал — **{_c.get('title','—')}**\n\nИдея: {_c.get('angle','—')}\n\n"
+                    f"**Script:**\n{_scenes}\n\nCTA: {_c.get('cta','—')}\n\n"
+                    f"Скажи что поменять — перепишу. Финал — напиши «сохрани в апрув»."), "time": t})
+            st.session_state["jack_mood"] = "happy"
+            st.rerun()
+
         # input
         with st.form("jack_msg", clear_on_submit=True):
             user_text = st.text_area("Your task / feedback for Jack", height=80, placeholder="e.g. 'переделай UK Eye Wash рилс — слишком грустно начало', 'возьми идею Pet Honesty 2nd-dog меме для Calming Chews'", label_visibility="collapsed")
