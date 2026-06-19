@@ -160,9 +160,19 @@ def _scene_table(scenes: list[dict]) -> dict:
     }
 
 
+def _normalize_brand(brand: str) -> str:
+    """Привести бренд к ТОЧНОМУ имени опции в Notion-поле Brand (регистр важен — иначе
+    Notion создаст дубликат опции). Существующие опции: BelovedPets / TOBYDIC / MAXBUDDY."""
+    b = str(brand or "").lower()
+    if b.startswith(("tob", "тоб")):
+        return "TOBYDIC"
+    if "max" in b or "buddy" in b or "бади" in b:
+        return "MAXBUDDY"
+    return "BelovedPets"
+
+
 def _build_properties(title: str, end_date: str | None, brand: str = "BelovedPets") -> dict:
-    # Normalise brand to the values the Notion DB expects
-    brand_name = "Tobydic" if str(brand).lower().startswith(("tob", "тоб")) else "BelovedPets"
+    brand_name = _normalize_brand(brand)
     props = {
         "Project name": {"title": _rich_text(title)},
         "Status": {"status": {"name": "Not started"}},
