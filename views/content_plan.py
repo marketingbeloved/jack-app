@@ -252,6 +252,14 @@ PLANS_BY_BRAND: dict[str, dict[str, list[dict]]] = {
 # Месяцы, доступные в календаре (label → (год, месяц)).
 MONTHS = {"Июнь 2026": (2026, 6), "Июль 2026": (2026, 7), "Август 2026": (2026, 8)}
 
+# Периоды для селектора: можно показать несколько месяцев сразу (label → список (год, месяц)).
+VIEWS = {
+    "Июнь + Июль 2026": [(2026, 6), (2026, 7)],
+    "Июнь 2026":        [(2026, 6)],
+    "Июль 2026":        [(2026, 7)],
+    "Август 2026":      [(2026, 8)],
+}
+
 
 # ─── Plan store (общая база) — даты/темы синхронятся у всех 4, правятся в UI ──
 def _plan_key(brand: str) -> str:
@@ -327,13 +335,34 @@ def _month_weeks(year: int, month: int) -> list[date]:
     return weeks
 
 
+def _render_calendar(year: int, month: int, plan: dict, briefs: dict, brand: str,
+                     market: str, owners: dict) -> None:
+    """Сетка одного месяца по неделям. Дни соседних месяцев — пустые клетки (для выравнивания)."""
+    for week_start in _month_weeks(year, month):
+        cols = st.columns(7, gap="small")
+        for day_offset in range(7):
+            d = week_start + timedelta(days=day_offset)
+            with cols[day_offset]:
+                if d.year != year or d.month != month:
+                    with st.container(border=True):
+                        st.markdown('<div class="cell-outside">&nbsp;</div>',
+                                    unsafe_allow_html=True)
+                    continue
+                key = d.strftime("%d.%m")
+                _render_cell(d, key, plan.get(key, []), briefs, brand, market, owners)
+
+
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
 
-    month_label = st.selectbox("Месяц", list(MONTHS.keys()), index=0, key="plan_month")
-    year, month = MONTHS[month_label]
+    view_label = st.selectbox("Период", list(VIEWS.keys()), index=0, key="plan_view")
+    view_months = VIEWS[view_label]
+    fy, fm = view_months[0]
+    ly, lm = view_months[-1]
+    add_min = date(fy, fm, 1)
+    add_max = (date(ly + 1, 1, 1) if lm == 12 else date(ly, lm + 1, 1)) - timedelta(days=1)
 
-    st.markdown(f"# 📅 Контент-план · {brand} · {month_label}")
+    st.markdown(f"# 📅 Контент-план · {brand} · {view_label}")
     st.caption("Календарь по неделям · цвет = категория · ➕ ТЗ в ячейке = Джек пишет ТЗ Вике. "
                "Даты/темы добавляются внизу (➕ Добавить пост) — появляются у всей команды сразу.")
 
@@ -371,28 +400,24 @@ def render():
     owners = _team_owners()
     _avatar_uploader(owners)
 
-    # ─── Calendar grid — недели выбранного месяца ─────────────────────────────
-    for week_start in _month_weeks(year, month):
-        cols = st.columns(7, gap="small")
-        for day_offset in range(7):
-            d = week_start + timedelta(days=day_offset)
-            key = d.strftime("%d.%m")
-            items = plan.get(key, [])
-            with cols[day_offset]:
-                _render_cell(d, key, items, briefs, brand, market, owners)
+    # ─── Календарь — выбранный период (один или несколько месяцев) ────────────
+    for vy, vm in view_months:
+        if len(view_months) > 1:
+            mlabel = next((k for k, v in MONTHS.items() if v == (vy, vm)), f"{vy}-{vm:02d}")
+            st.markdown(f'<div class="month-divider">📅 {mlabel}</div>', unsafe_allow_html=True)
+        _render_calendar(vy, vm, plan, briefs, brand, market, owners)
 
     st.markdown("<br/>", unsafe_allow_html=True)
     n_comments = len([1 for e in briefs.values() if e.get("text")])
     st.caption(f"💬 {n_comments} ТЗ для Вики сохранено в этом плане")
 
     # ─── Добавить / удалить пост в плане (синхронно у всех 4) ─────────────────
-    month_last = (date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)) - timedelta(days=1)
     with st.expander("➕ Добавить пост в план", expanded=(not plan)):
         st.caption("Добавляешь один раз — видят все. Без зипов и пересылок.")
         with st.form("add_plan_post", clear_on_submit=True):
             ac1, ac2 = st.columns(2)
-            add_date = ac1.date_input("Дата", value=date(year, month, 1),
-                                      min_value=date(year, month, 1), max_value=month_last,
+            add_date = ac1.date_input("Дата", value=add_min,
+                                      min_value=add_min, max_value=add_max,
                                       key="add_plan_date")
             add_type = ac2.selectbox("Тип (цвет ячейки)", ["engaging", "selling", "viral", "neutral"],
                                      key="add_plan_type")
@@ -677,5 +702,13 @@ div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
 .cell-item-meta { font-size: 0.64rem; opacity: 0.82; font-weight: 600; }
+/* заголовок-разделитель месяца в режиме «Июнь + Июль» */
+.month-divider {
+    font-size: 1.15rem; font-weight: 800; color: #1B339E;
+    margin: 26px 0 10px 0; padding: 4px 0 8px 2px;
+    border-bottom: 2px solid #C9D4E3;
+}
+/* день соседнего месяца — пустая клетка, только держит сетку */
+.cell-outside { min-height: 96px; background: #FAFBFD; }
 </style>
 """
