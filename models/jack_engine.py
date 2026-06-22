@@ -390,6 +390,52 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
     return enriched
 
 
+def generate_concepts_deep(req: dict, save: bool = False) -> list[dict]:
+    """Многопроходная («вдумчивая») генерация — ответ на «нельзя написать креативный
+    скрипт за 40 сек». Проход 1: Джек накидывает 4 разных угла, критикует их как
+    креатив-директор и выбирает/затачивает сильнейший. Проход 2: разворачивает
+    ИМЕННО этот угол в детальный посценный скрипт (через обычный структурный генератор).
+    ~1.5-2 мин против ~40 сек, но заметно глубже и небанальнее."""
+    brand = req.get("brand", "BelovedPets")
+    base_ctx = req.get("context", "")
+    markets = ", ".join(req.get("markets", ["US"]))
+    try:
+        from models.jack_lessons import render_for_prompt as _les, render_rules_for_prompt as _rul
+        extra = _rul(brand) + _les(brand=brand, max_count=15)
+    except Exception:
+        extra = ""
+    system = _system_prompt() + extra + _load_corpus_examples(n=3, kind_hint="", brand=brand)
+
+    angle_prompt = textwrap.dedent(f"""\
+        Бриф: {base_ctx}
+        Бренд: {brand}. Рынки: {markets}.
+
+        Ты senior creative-директор. Сделай ТРИ шага в одном ответе (русский, без JSON, без ```):
+        1) Накидай 4 РАЗНЫХ вирусных угла под этот бриф — разные механики
+           (POV / образовательный / trend-jack / эмоционально-relatable / комедийный).
+           Для каждого: цепляющий hook (первые 2 сек) + одной строкой почему сработает.
+        2) Жёстко раскритикуй их как придирчивый креатив-директор: что шаблонно, что
+           уже все делали, где слабый или предсказуемый hook.
+        3) Выбери ОДИН самый сильный (или собери лучшее из нескольких) и ЗАОСТРИ его:
+           финальный hook, эмоция, структура по секундам в общих чертах, чем он
+           отличается от того, что уже делают Zesty Paws / Pet Honesty.
+        Верни подробно ВЫБРАННЫЙ заострённый угол — дальше развернём его в полный скрипт.
+    """)
+    chosen = call_claude(angle_prompt, system, timeout=150)
+    if not chosen or chosen.startswith("__ERROR__") or chosen.startswith("⚠️"):
+        chosen = ""  # фолбэк: если первый проход не удался — просто обычная генерация
+
+    req2 = dict(req)
+    if chosen:
+        req2["context"] = (
+            base_ctx
+            + "\n\n=== ВЫБРАННЫЙ УГОЛ (уже отобран и заострён креатив-директором — "
+            "разворачивай ИМЕННО его, детально и посценно, НЕ переобобщай в шаблон) ===\n"
+            + chosen
+        )
+    return generate_concepts(req2, save=save)
+
+
 def promote_to_approve(concept: dict) -> None:
     """Save a concept from chat-session into the Approve cache."""
     if not concept:

@@ -207,7 +207,7 @@ def render():
             brief_ctx = _assemble_brief_from_chat(st.session_state["ws_messages"])
             all_txt = " ".join(m.get("text", "") for m in _said)
             with st.spinner(f"🐾 Jack пишет рилс для {eff_brand}…"):
-                from models.jack_engine import generate_concepts
+                from models.jack_engine import generate_concepts_deep
                 req = {
                     "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
                     "products": ["см. запрос"],
@@ -215,7 +215,7 @@ def render():
                     "context": brief_ctx,
                 }
                 try:
-                    _res = generate_concepts(req, save=False)
+                    _res = generate_concepts_deep(req, save=False)
                 except Exception as _e:  # noqa: BLE001
                     _res = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
             if _res and "error" in _res[0]:
@@ -249,8 +249,9 @@ def render():
                     f'{html.escape(user_text.strip())}</div>',
                     unsafe_allow_html=True,
                 )
-                st.info("🐾 **Джек пишет скрипт…** Это 20–40 сек на бесплатном сервере — "
-                        "не закрывай вкладку, рилс появится в чате сам.")
+                st.info("🐾 **Джек думает над скриптом…** Глубокий режим: накидывает углы, "
+                        "критикует, выбирает сильнейший и разворачивает в скрипт — ~1.5–2 мин. "
+                        "Не закрывай вкладку, рилс появится в чате сам.")
 
                 # Detect URLs and try to read them (TikTok / IG / YouTube / Drive / web pages)
                 import re
@@ -336,7 +337,7 @@ def render():
                 # Decide mode: full brief generation (in-chat) OR conversational chat
                 if looks_like_full_brief(user_text):
                     with st.spinner(f"🐾 Jack пишет ТЗ для {effective_brand}…"):
-                        from models.jack_engine import generate_concepts
+                        from models.jack_engine import generate_concepts_deep
                         # If we already have a draft in chat session, this is a refinement — include prior draft
                         prior = st.session_state.get("draft_concept")
                         ctx = user_text + (("\n\nREFERENCES:\n" + refs_context) if refs_context else "")
@@ -357,7 +358,7 @@ def render():
                         # GENERATE WITHOUT SAVING — keep draft in chat session only.
                         # Любая ошибка → видимое сообщение Джека (а не молчаливый вечный спиннер).
                         try:
-                            result = generate_concepts(req, save=False)
+                            result = generate_concepts_deep(req, save=False)
                         except Exception as _e:  # noqa: BLE001
                             result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
                 else:
@@ -377,7 +378,7 @@ def render():
                         all_darya = " ".join(m.get("text", "") for m in st.session_state["ws_messages"]
                                              if m.get("who") in ("darya", "tanya"))
                         with st.spinner(f"🐾 Jack пишет рилс для {effective_brand}…"):
-                            from models.jack_engine import generate_concepts
+                            from models.jack_engine import generate_concepts_deep
                             req = {
                                 "brand": effective_brand, "n": 1,
                                 "markets": [_market_from_text(all_darya)],
@@ -386,7 +387,7 @@ def render():
                                 "context": brief_ctx,
                             }
                             try:
-                                result = generate_concepts(req, save=False)
+                                result = generate_concepts_deep(req, save=False)
                             except Exception as _e:  # noqa: BLE001
                                 result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
                         # падаем в общий разбор result ниже (без rerun)
