@@ -1,5 +1,6 @@
 """Jack Workspace — Darya and Tanya talk to Jack here. Lottie animated Jack on the side."""
 
+import html
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -239,6 +240,17 @@ def render():
                 t = datetime.now().strftime("%H:%M")
                 st.session_state["ws_messages"].append({"who": sender.lower(), "text": user_text.strip(), "time": t})
                 st.session_state["jack_mood"] = "thinking"
+
+                # МГНОВЕННАЯ обратная связь: история сверху отрендерилась ещё БЕЗ этого
+                # сообщения (форма очистилась) — поэтому эхо + явный баннер «Джек пишет»
+                # прямо тут, чтобы не выглядело «ничего не происходит» все 20-40 сек.
+                st.markdown(
+                    f'<div class="msg user-msg"><div class="msg-label">{sender} · {t}</div>'
+                    f'{html.escape(user_text.strip())}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.info("🐾 **Джек пишет скрипт…** Это 20–40 сек на бесплатном сервере — "
+                        "не закрывай вкладку, рилс появится в чате сам.")
 
                 # Detect URLs and try to read them (TikTok / IG / YouTube / Drive / web pages)
                 import re
