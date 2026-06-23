@@ -9,7 +9,35 @@ from __future__ import annotations
 import base64
 import os
 import subprocess
+import time
 from pathlib import Path
+
+
+def _gemini_request(url: str, body: dict, timeout: int, attempts: int = 4) -> tuple[str, str]:
+    """POST к Gemini с автоповтором при ВРЕМЕННОЙ перегрузке (503/429/500 — 'high demand').
+    Возвращает (text, ""), либо ("", "⚠️ …") с человеческим текстом. Бэкофф 2/4/6 сек."""
+    import requests
+    for i in range(attempts):
+        try:
+            r = requests.post(url, json=body, timeout=timeout)
+            if r.status_code == 200:
+                try:
+                    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip(), ""
+                except Exception:
+                    return "", "⚠️ Gemini вернул пустой ответ — попробуй ещё раз."
+            if r.status_code in (429, 500, 503) and i < attempts - 1:
+                time.sleep(2 * (i + 1))  # 2s, 4s, 6s — переждать всплеск спроса
+                continue
+            if r.status_code in (429, 503):
+                return "", ("⚠️ Gemini сейчас перегружен (всплеск спроса у Google). "
+                            "Это временно — подожди минуту и нажми ещё раз.")
+            return "", f"⚠️ Gemini ошибка {r.status_code}: {r.text[:300]}"
+        except Exception as e:  # noqa: BLE001
+            if i < attempts - 1:
+                time.sleep(2 * (i + 1))
+                continue
+            return "", f"⚠️ Gemini запрос не прошёл: {e}"
+    return "", "⚠️ Gemini перегружен — попробуй чуть позже."
 
 
 def _gemini_key() -> str:
@@ -46,14 +74,8 @@ def gemini_vision(prompt: str, images: list[bytes], mime_types: list[str] | None
         parts.append({"inline_data": {"mime_type": mt or "image/jpeg",
                                        "data": base64.b64encode(img).decode()}})
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    try:
-        r = requests.post(url, json={"contents": [{"parts": parts}]}, timeout=timeout)
-        if r.status_code != 200:
-            return f"⚠️ Gemini ошибка {r.status_code}: {r.text[:300]}"
-        data = r.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception as e:  # noqa: BLE001
-        return f"⚠️ Gemini запрос не прошёл: {e}"
+    text, err = _gemini_request(url, {"contents": [{"parts": parts}]}, timeout)
+    return text if text else err
 
 
 def gemini_text(prompt: str, system: str = "", model: str = "gemini-2.5-flash",
@@ -68,13 +90,8 @@ def gemini_text(prompt: str, system: str = "", model: str = "gemini-2.5-flash",
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    try:
-        r = requests.post(url, json=body, timeout=timeout)
-        if r.status_code != 200:
-            return f"⚠️ Gemini ошибка {r.status_code}: {r.text[:300]}"
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception as e:  # noqa: BLE001
-        return f"⚠️ Gemini запрос не прошёл: {e}"
+    text, err = _gemini_request(url, body, timeout)
+    return text if text else err
 
 
 def has_claude_cli() -> bool:

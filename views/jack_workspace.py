@@ -488,7 +488,12 @@ def render():
                         img_mimes = [f.type or "image/jpeg" for f in cap_imgs] if cap_imgs else []
                         vid_data = cap_video.getvalue() if cap_video else None
                         vid_suffix = ("." + cap_video.name.rsplit(".", 1)[-1]) if cap_video and "." in cap_video.name else ".mp4"
-                        spin = "🐾 Джек смотрит рилс и пишет подпись…" if has_media else "🐾 Джек пишет подпись…"
+                        if cap_video:
+                            spin = "🐾 Джек смотрит рилс и пишет подпись…"
+                        elif cap_imgs:
+                            spin = "🐾 Джек смотрит фото и пишет подпись…"
+                        else:
+                            spin = "🐾 Джек пишет подпись…"
                         with st.spinner(spin):
                             cap_txt = caption_from_media(
                                 images=img_data, mime_types=img_mimes,
