@@ -333,11 +333,20 @@ def call_claude(prompt: str, system: str, timeout: int = 120) -> str:
 
 
 def _parse_json(text: str) -> dict:
-    """Extract JSON from Claude's output even if it wrapped in code fences."""
+    """Extract JSON from the model output even if wrapped in prose / code fences."""
     if "__ERROR__" in text:
         return {"error": text}
-    # Strip code fences if any
-    m = re.search(r"\{[\s\S]*\}", text)
+    t = (text or "").strip()
+    # Снять ```json … ``` обёртку, если есть
+    t = re.sub(r"^```(?:json)?\s*", "", t)
+    t = re.sub(r"\s*```$", "", t).strip()
+    # 1) Попробовать распарсить целиком
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+    # 2) Выдернуть самый большой {...}-блок
+    m = re.search(r"\{[\s\S]*\}", t)
     if not m:
         return {"error": "no JSON in response", "raw": text[:400]}
     try:
@@ -376,6 +385,31 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
     system = _system_prompt() + lessons_block + examples
     out = call_claude(_user_prompt(req), system, timeout=180)
     parsed = _parse_json(out)
+
+    # Gemini Flash нестабилен с JSON. Если ответ ПРИШЁЛ, но не распарсился —
+    # повторяем один раз с жёстким требованием чистого JSON.
+    llm_failed = "__ERROR__" in str(parsed.get("error", "")) or "⚠️" in str(parsed.get("error", ""))
+    if "error" in parsed and not llm_failed:
+        strict_sys = system + ("\n\nКРИТИЧНО: верни СТРОГО валидный JSON-объект и НИЧЕГО больше — "
+                               "без текста до/после, без markdown-фенсов. Начни с '{' и закончи '}'.")
+        out2 = call_claude(_user_prompt(req) + "\n\nReturn ONLY a valid JSON object — no prose, no ``` fences.",
+                           strict_sys, timeout=180)
+        parsed2 = _parse_json(out2)
+        if "error" not in parsed2:
+            parsed = parsed2
+        else:
+            # Спасаем контент: показываем текст Джека как скрипт (лучше, чем «no JSON»).
+            raw = out2 if (out2 and "__ERROR__" not in out2) else out
+            if raw and "__ERROR__" not in raw and len(raw.strip()) > 40:
+                lines = [ln for ln in raw.strip().splitlines() if ln.strip()]
+                return [{
+                    "id": uuid.uuid4().hex[:8], "status": "draft",
+                    "brand": req.get("brand", "BelovedPets"),
+                    "title": "Скрипт рилса", "angle": "", "hook": "",
+                    "scenes": lines, "cta": "", "why_it_works": "",
+                }]
+            return [{"error": parsed.get("error", "no JSON"), "raw": parsed.get("raw", "")}]
+
     if "error" in parsed:
         return [{"error": parsed["error"], "raw": parsed.get("raw", "")}]
     concepts = parsed.get("concepts", [])
