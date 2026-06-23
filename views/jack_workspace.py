@@ -57,6 +57,67 @@ def _pillar_to_type(pillar: str) -> str:
     return "engaging"
 
 
+def _now_hm() -> str:
+    return datetime.now().strftime("%H:%M")
+
+
+def _launch_bg_generation(req: dict, t: str) -> None:
+    """Запустить генерацию рилса В ФОНЕ (отдельный поток) + показать, что Джек пишет.
+    Результат подтянет polling-фрагмент — даже если соединение сбросится или вкладку
+    перезагрузят (job_id хранится в URL). Это и есть фикс «Джек не пишет» на free-облаке."""
+    from models.jack_jobs import start_job
+    job_id = start_job(req)
+    st.session_state["active_job"] = job_id
+    try:
+        st.query_params["job"] = job_id   # переживёт перезагрузку вкладки
+    except Exception:
+        pass
+    st.session_state["ws_messages"].append({"who": "jack", "text": (
+        "🐾 Принял — пишу скрипт в фоне. Появится здесь сам через ~1–2 мин. "
+        "Можно даже закрыть или обновить вкладку — результат не потеряется."), "time": t})
+    st.session_state["jack_mood"] = "thinking"
+
+
+@st.fragment(run_every=3)
+def _poll_active_job() -> None:
+    """Каждые 3 сек опрашивает фоновую задачу. Когда готово — вписывает скрипт в чат
+    и делает полный rerun. Тикает только пока есть активная задача."""
+    job_id = st.session_state.get("active_job")
+    if not job_id:
+        try:
+            job_id = st.query_params.get("job")
+        except Exception:
+            job_id = None
+    if not job_id:
+        return
+    from models.jack_jobs import get_job
+    job = get_job(job_id)
+    if not job or job.get("status") == "pending":
+        st.info("🐾 **Джек пишет скрипт в фоне…** (~1–2 мин). Можно обновить вкладку — не потеряется.")
+        return
+    st.session_state.setdefault("ws_messages", [])
+    if job.get("status") == "done" and job.get("result"):
+        c = job["result"]
+        st.session_state["draft_concept"] = c
+        scenes = "\n".join(c.get("scenes", [])) or "(сцен нет)"
+        why = c.get("why_it_works", "")
+        st.session_state["ws_messages"].append({"who": "jack", "text": (
+            f"Окей, набросал — **{c.get('title','—')}**\n\nИдея: {c.get('angle','—')}\n\n"
+            f"**Script:**\n{scenes}\n\nCTA: {c.get('cta','—')}"
+            + (f"\n\nПочему сработает: {why}" if why else "")
+            + "\n\nСкажи что поменять — перепишу. Финал — напиши «сохрани в апрув»."), "time": _now_hm()})
+    else:
+        st.session_state["ws_messages"].append({"who": "jack", "text": (
+            f"Хм, не получилось — {job.get('error','')}. Нажми «Написать рилс сейчас» ещё раз."), "time": _now_hm()})
+    st.session_state.pop("active_job", None)
+    try:
+        del st.query_params["job"]
+    except Exception:
+        pass
+    st.session_state["jack_mood"] = "happy"
+    st.rerun()
+
+
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
     st.markdown(f"# 🐾 Jack Workspace · {brand}")
@@ -155,6 +216,17 @@ def render():
                     unsafe_allow_html=True,
                 )
 
+        # Фоновая генерация: показываем статус и сами подтягиваем готовый скрипт.
+        # Тикаем только когда задача есть (в сессии или в URL — переживает перезагрузку).
+        _has_job = bool(st.session_state.get("active_job"))
+        if not _has_job:
+            try:
+                _has_job = bool(st.query_params.get("job"))
+            except Exception:
+                _has_job = False
+        if _has_job:
+            _poll_active_job()
+
         # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
         try:
             from models import shared_store
@@ -200,36 +272,19 @@ def render():
         # Чтобы Джек не зацикливался на уточнениях — Дарья/Таня в любой момент жмут
         # кнопку, и он пишет скрипт по всему сказанному выше (не ждёт «иду писать»).
         _said = [m for m in st.session_state.get("ws_messages", []) if m.get("who") in ("darya", "tanya")]
-        if _said and st.button("✍️ Написать рилс сейчас (по всему, что сказали выше)",
-                               use_container_width=True, key="force_write"):
+        if _said and not st.session_state.get("active_job") and st.button(
+                "✍️ Написать рилс сейчас (по всему, что сказали выше)",
+                use_container_width=True, key="force_write"):
             t = datetime.now().strftime("%H:%M")
             eff_brand = "Tobydic" if sender.lower() == "tanya" else brand
-            brief_ctx = _assemble_brief_from_chat(st.session_state["ws_messages"])
             all_txt = " ".join(m.get("text", "") for m in _said)
-            with st.spinner(f"🐾 Jack пишет рилс для {eff_brand}…"):
-                from models.jack_engine import generate_concepts
-                req = {
-                    "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
-                    "products": ["см. запрос"],
-                    "pillars": ["Amazon Video"] if "amazon" in all_txt.lower() else [],
-                    "context": brief_ctx,
-                }
-                try:
-                    _res = generate_concepts(req, save=False)
-                except Exception as _e:  # noqa: BLE001
-                    _res = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
-            if _res and "error" in _res[0]:
-                st.session_state["ws_messages"].append(
-                    {"who": "jack", "text": f"Хм, не получилось — {_res[0]['error']}. Попробуй ещё раз.", "time": t})
-            elif _res:
-                _c = _res[0]
-                st.session_state["draft_concept"] = _c
-                _scenes = "\n".join(_c.get("scenes", [])) or "(сцен нет)"
-                st.session_state["ws_messages"].append({"who": "jack", "text": (
-                    f"Окей, набросал — **{_c.get('title','—')}**\n\nИдея: {_c.get('angle','—')}\n\n"
-                    f"**Script:**\n{_scenes}\n\nCTA: {_c.get('cta','—')}\n\n"
-                    f"Скажи что поменять — перепишу. Финал — напиши «сохрани в апрув»."), "time": t})
-            st.session_state["jack_mood"] = "happy"
+            req = {
+                "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
+                "products": ["см. запрос"],
+                "pillars": ["Amazon Video"] if "amazon" in all_txt.lower() else [],
+                "context": _assemble_brief_from_chat(st.session_state["ws_messages"]),
+            }
+            _launch_bg_generation(req, t)
             st.rerun()
 
         # input
@@ -249,8 +304,7 @@ def render():
                     f'{html.escape(user_text.strip())}</div>',
                     unsafe_allow_html=True,
                 )
-                st.info("🐾 **Джек пишет скрипт…** ~20–40 сек на бесплатном сервере. "
-                        "Не закрывай вкладку, рилс появится в чате сам.")
+                st.info("🐾 **Джек принял задачу…**")
 
                 # Detect URLs and try to read them (TikTok / IG / YouTube / Drive / web pages)
                 import re
@@ -333,33 +387,27 @@ def render():
                     st.session_state["jack_mood"] = "happy"
                     st.rerun()
 
-                # Decide mode: full brief generation (in-chat) OR conversational chat
+                # Decide mode: полный бриф → ФОНОВАЯ генерация (переживает сбросы);
+                # короткий запрос → разговорный ответ (короткий, остаётся inline).
                 if looks_like_full_brief(user_text):
-                    with st.spinner(f"🐾 Jack пишет ТЗ для {effective_brand}…"):
-                        from models.jack_engine import generate_concepts
-                        # If we already have a draft in chat session, this is a refinement — include prior draft
-                        prior = st.session_state.get("draft_concept")
-                        ctx = user_text + (("\n\nREFERENCES:\n" + refs_context) if refs_context else "")
-                        if prior:
-                            ctx = (
-                                f"=== PREVIOUS DRAFT ===\n"
-                                f"Title: {prior.get('title','')}\nFormat: {prior.get('format','')}\nHook: {prior.get('hook','')}\nAngle: {prior.get('angle','')}\n"
-                                f"Scenes:\n" + "\n".join(prior.get('scenes', [])) + "\n\n"
-                                f"=== DARYA WANTS TO CHANGE ===\n{user_text}\n\n"
-                                f"Перепиши концепт с учётом её правки. Та же база — формат/продукт/рынок, но меняй то что она просит."
-                            )
-                        req = {
-                            "brand": effective_brand, "n": 1, "markets": ["US"],
-                            "products": ["см. запрос"],
-                            "pillars": ["Amazon Video"] if "amazon" in user_text.lower() else [],
-                            "context": ctx,
-                        }
-                        # GENERATE WITHOUT SAVING — keep draft in chat session only.
-                        # Любая ошибка → видимое сообщение Джека (а не молчаливый вечный спиннер).
-                        try:
-                            result = generate_concepts(req, save=False)
-                        except Exception as _e:  # noqa: BLE001
-                            result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
+                    prior = st.session_state.get("draft_concept")
+                    ctx = user_text + (("\n\nREFERENCES:\n" + refs_context) if refs_context else "")
+                    if prior:
+                        ctx = (
+                            f"=== PREVIOUS DRAFT ===\n"
+                            f"Title: {prior.get('title','')}\nFormat: {prior.get('format','')}\nHook: {prior.get('hook','')}\nAngle: {prior.get('angle','')}\n"
+                            f"Scenes:\n" + "\n".join(prior.get('scenes', [])) + "\n\n"
+                            f"=== DARYA WANTS TO CHANGE ===\n{user_text}\n\n"
+                            f"Перепиши концепт с учётом её правки. Та же база — формат/продукт/рынок, но меняй то что она просит."
+                        )
+                    req = {
+                        "brand": effective_brand, "n": 1, "markets": [_market_from_text(user_text)],
+                        "products": ["см. запрос"],
+                        "pillars": ["Amazon Video"] if "amazon" in user_text.lower() else [],
+                        "context": ctx,
+                    }
+                    _launch_bg_generation(req, t)
+                    st.rerun()
                 else:
                     # Conversational reply
                     with st.spinner("🐾 Jack думает…"):
@@ -370,55 +418,20 @@ def render():
                             brand=effective_brand,
                         )
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
-                    # Если Джек сказал «иду писать» — это сигнал готовности: собираем бриф
-                    # из всего диалога и РЕАЛЬНО генерим (раньше он говорил «иду писать» и молчал).
+                    # «иду писать» → запускаем ФОНОВУЮ генерацию по всему диалогу
                     if _signals_ready_to_write(reply):
-                        brief_ctx = _assemble_brief_from_chat(st.session_state["ws_messages"], refs_context)
                         all_darya = " ".join(m.get("text", "") for m in st.session_state["ws_messages"]
                                              if m.get("who") in ("darya", "tanya"))
-                        with st.spinner(f"🐾 Jack пишет рилс для {effective_brand}…"):
-                            from models.jack_engine import generate_concepts
-                            req = {
-                                "brand": effective_brand, "n": 1,
-                                "markets": [_market_from_text(all_darya)],
-                                "products": ["см. запрос"],
-                                "pillars": ["Amazon Video"] if "amazon" in all_darya.lower() else [],
-                                "context": brief_ctx,
-                            }
-                            try:
-                                result = generate_concepts(req, save=False)
-                            except Exception as _e:  # noqa: BLE001
-                                result = [{"error": f"{type(_e).__name__}: {str(_e)[:200]}"}]
-                        # падаем в общий разбор result ниже (без rerun)
-                    else:
-                        st.session_state["jack_mood"] = "happy"
-                        st.rerun()
-                if result and "error" in result[0]:
-                    reply = f"Хм, что-то не получилось — {result[0]['error']}. Давай попробуем ещё раз?"
-                elif result:
-                    c = result[0]
-                    # Keep this draft in session for further refinement in chat
-                    st.session_state["draft_concept"] = c
-                    scenes = c.get("scenes", [])
-                    scenes_text = "\n".join(scenes) if scenes else "(сцен нет)"
-                    title = c.get("title", "—")
-                    angle = c.get("angle", "—")
-                    cta = c.get("cta", "—")
-                    why = c.get("why_it_works", "—")
-                    reply = (
-                        f"Окей, Даша, набросал — **{title}**\n\n"
-                        f"Идея: {angle}\n\n"
-                        f"**Script:**\n{scenes_text}\n\n"
-                        f"CTA: {cta}\n\n"
-                        f"Почему сработает: {why}\n\n"
-                        f"Скажи что поменять (напр. «hook покомичнее», «убери Pet Honesty стиль») — перепишу прямо тут в чате. "
-                        f"Когда финал — напиши «**сохрани в апрув**» — переедет в Pipeline → To approve, и я отправлю Дине."
-                    )
-                else:
-                    reply = "Ничего не пришло от engine — давай конкретнее: какой продукт, рынок и длительность?"
-                st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
-                st.session_state["jack_mood"] = "happy"
-                st.rerun()
+                        req = {
+                            "brand": effective_brand, "n": 1,
+                            "markets": [_market_from_text(all_darya)],
+                            "products": ["см. запрос"],
+                            "pillars": ["Amazon Video"] if "amazon" in all_darya.lower() else [],
+                            "context": _assemble_brief_from_chat(st.session_state["ws_messages"], refs_context),
+                        }
+                        _launch_bg_generation(req, t)
+                    st.session_state["jack_mood"] = "happy"
+                    st.rerun()
 
         # ─── Vika's images → Jack writes the post text ──────────────────────
         with st.expander("📸 Картинки Вики → Джек напишет текст", expanded=False):
