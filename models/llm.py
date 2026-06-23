@@ -171,8 +171,13 @@ def smart_text(prompt: str, system: str = "", timeout: int = 180) -> str:
     out = gemini_text(prompt, system=system, model="gemini-2.5-flash", timeout=timeout)
     if out and not out.startswith("⚠️"):
         return out
-    return ("⚠️ Генерация недоступна: нет ни Claude (мак), ни ключа Gemini. "
-            "Добавь GEMINI_API_KEY в Settings → Secrets, чтобы Джек писал на сайте.")
+    # Честная диагностика: если ключ ВООБЩЕ не настроен — одно; если ключ есть, но
+    # Gemini вернул ошибку (протух токен / лимит / перегрузка) — показываем ЕЁ, а не
+    # вводящее в заблуждение «нет ключа».
+    if not _gemini_key():
+        return ("⚠️ Ключ Gemini не настроен. Добавь GEMINI_API_KEY в Settings → Secrets.")
+    return ("⚠️ Gemini не ответил (ключ есть, но запрос отклонён — возможно протух токен, "
+            f"лимит или перегрузка). Точный ответ Gemini: {out[:200]}")
 
 
 def claude(prompt: str, system: str = "", timeout: int = 600) -> str:
