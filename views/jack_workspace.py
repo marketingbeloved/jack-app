@@ -266,12 +266,12 @@ def render():
                     try:
                         r = _rq.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8, allow_redirects=True)
                         if r.status_code == 200:
-                            html = r.text[:80_000]
+                            page_html = r.text[:80_000]
                             # Pull og:title / og:description / view counts
-                            m_title = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html)
-                            m_desc = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', html)
-                            m_views = re.search(r'"(playCount|view_count|viewCount)"\s*:\s*(\d+)', html)
-                            m_likes = re.search(r'"(diggCount|like_count|likeCount)"\s*:\s*(\d+)', html)
+                            m_title = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', page_html)
+                            m_desc = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', page_html)
+                            m_views = re.search(r'"(playCount|view_count|viewCount)"\s*:\s*(\d+)', page_html)
+                            m_likes = re.search(r'"(diggCount|like_count|likeCount)"\s*:\s*(\d+)', page_html)
                             piece = f"\n--- {url} ---\n"
                             if m_title: piece += f"Title: {m_title.group(1)}\n"
                             if m_desc: piece += f"Desc: {m_desc.group(1)[:300]}\n"
