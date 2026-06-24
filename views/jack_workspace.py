@@ -90,11 +90,14 @@ def _poll_active_job() -> None:
             job_id = None
     if not job_id:
         return
+    if st.session_state.get("shown_job") == job_id:
+        return  # результат этой задачи уже вписан — не дублируем
     from models.jack_jobs import get_job
     job = get_job(job_id)
     if not job or job.get("status") == "pending":
-        st.info("🐾 **Джек пишет скрипт в фоне…** (~1–2 мин). Можно обновить вкладку — не потеряется.")
+        st.info("🐾 **Джек пишет скрипт в фоне…** (~30–60 сек). Можно обновить вкладку — не потеряется.")
         return
+    st.session_state["shown_job"] = job_id
     st.session_state.setdefault("ws_messages", [])
     if job.get("status") == "done" and job.get("result"):
         c = job["result"]

@@ -58,40 +58,52 @@ def _gemini_key() -> str:
     return ""
 
 
-def gemini_vision(prompt: str, images: list[bytes], mime_types: list[str] | None = None,
-                  model: str = "gemini-2.5-flash", timeout: int = 90) -> str:
-    """Send a prompt + images to Gemini and return the text reply.
+# При перегрузке одной модели (503 «high demand») пробуем другие — у них РАЗНЫЕ пулы
+# мощностей, поэтому если 2.5-flash лёг, 2.0-flash обычно отвечает. Все бесплатные.
+_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
 
-    images: list of raw image bytes. mime_types: parallel list (default image/jpeg).
-    """
-    import requests
+
+def _is_overload(err: str) -> bool:
+    e = (err or "").lower()
+    return any(s in e for s in ("перегруж", "503", "429", "unavailable", "overload", "high demand"))
+
+
+def _gemini_call(body: dict, timeout: int, primary: str) -> str:
+    """Вызов Gemini с фолбэком по моделям при перегрузке. Текст или '⚠️ …'."""
     key = _gemini_key()
     if not key:
-        return "⚠️ Gemini key не найден (ни в secrets, ни в env, ни в JoinBrands .env)."
+        return "⚠️ Gemini key не найден."
+    models = [primary] + [m for m in _FALLBACK_MODELS if m != primary]
+    last_err = "⚠️ Gemini недоступен."
+    for m in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
+        text, err = _gemini_request(url, body, timeout)
+        if text:
+            return text
+        last_err = err
+        if not _is_overload(err):
+            break  # не перегрузка (битый ключ/лимит) — другая модель не спасёт
+    return last_err
+
+
+def gemini_vision(prompt: str, images: list[bytes], mime_types: list[str] | None = None,
+                  model: str = "gemini-2.5-flash", timeout: int = 90) -> str:
+    """Send a prompt + images to Gemini (с фолбэком по моделям). Returns text or '⚠️ …'."""
     mime_types = mime_types or ["image/jpeg"] * len(images)
     parts = [{"text": prompt}]
     for img, mt in zip(images, mime_types):
         parts.append({"inline_data": {"mime_type": mt or "image/jpeg",
                                        "data": base64.b64encode(img).decode()}})
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    text, err = _gemini_request(url, {"contents": [{"parts": parts}]}, timeout)
-    return text if text else err
+    return _gemini_call({"contents": [{"parts": parts}]}, timeout, model)
 
 
 def gemini_text(prompt: str, system: str = "", model: str = "gemini-2.5-flash",
                 timeout: int = 120) -> str:
-    """Text-only Gemini call. Returns reply text or a '⚠️ …' error string."""
-    import requests
-    key = _gemini_key()
-    if not key:
-        return "⚠️ Gemini key не найден."
-    contents = [{"parts": [{"text": prompt}]}]
-    body: dict = {"contents": contents}
+    """Text-only Gemini call (с фолбэком по моделям при перегрузке). Returns text or '⚠️ …'."""
+    body: dict = {"contents": [{"parts": [{"text": prompt}]}]}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    text, err = _gemini_request(url, body, timeout)
-    return text if text else err
+    return _gemini_call(body, timeout, model)
 
 
 def has_claude_cli() -> bool:
