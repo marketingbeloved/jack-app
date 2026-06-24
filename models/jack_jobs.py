@@ -40,11 +40,10 @@ def _run_job(job_id: str, req: dict) -> None:
     """Тело фонового потока: генерим скрипт и пишем результат в общую базу."""
     from models import shared_store
     try:
-        # Фон не ограничен таймаутом веб-сессии → можно «думать» глубоко (2 прохода:
-        # углы → критика → выбор → детальный скрипт). Если 1-й проход не удался —
-        # generate_concepts_deep сам деградирует до обычной генерации (не хуже).
-        from models.jack_engine import generate_concepts_deep
-        res = generate_concepts_deep(req, save=False)
+        # ОДИН проход (а не глубокий 2-проходный) — бережём бесплатный суточный лимит
+        # Gemini (deep жёг вдвое). Фон сохраняем — он и решает проблему надёжности.
+        from models.jack_engine import generate_concepts
+        res = generate_concepts(req, save=False)
         if res and isinstance(res[0], dict) and "error" in res[0]:
             shared_store.put_json(_key(job_id), {"status": "error", "result": None,
                                                  "error": str(res[0].get("error", "ошибка"))[:300]})
