@@ -8,16 +8,7 @@ from utils.jack_svg import render_jack
 from models.competitor_parser import fetch_competitor_ideas, last_refresh
 from models.jack_engine import load_concepts
 from models.brand_stats import fetch_report, trend, format_num, format_delta
-
-
-# ─── June 2026 content plan — kept in sync with content_plan.py ─────────────
-JUNE_TODAY_DEMO = {
-    "08.06": [{"title": "фото от блогера", "type": "engaging"}],
-    "09.06": [{"title": "persian eye tear stains POV", "type": "entertaining"}],
-    "10.06": [{"title": "eye wipes carousel uk", "type": "selling"}],
-    "11.06": [{"title": "faire canada reel invite", "type": "selling"}],
-    "12.06": [{"title": "gut health 30s breakdown", "type": "engaging"}],
-}
+from models import socials, plan_stats
 
 
 def render():
@@ -57,26 +48,46 @@ def render():
         delta = format_delta(latest, prev) or None
         sc[i].metric(label, format_num(latest), delta=delta)
 
-    # ─── Today's pipeline ───────────────────────────────────────────────────
-    today_str = date.today().strftime("%d.%m")
-    today_items = JUNE_TODAY_DEMO.get(today_str, [])
-
-    st.markdown(f'<div class="section-label" style="margin-top:28px;">📅 Today · {today_str}</div>', unsafe_allow_html=True)
-    if today_items:
-        type_color = {"engaging":("#D9F0D1","#3A6B2A"), "selling":("#F4C7C7","#8E2424"), "entertaining":("#D7CBE8","#553A8B")}
-        for item in today_items:
-            bg, fg = type_color.get(item["type"], ("#EEF4FA","#1F2A3F"))
-            st.markdown(
-                f"""
-                <div style="background:#FFF; border:1px solid #D9E2EE; border-radius:10px; padding:10px 14px; margin:4px 0;">
-                    <span style="background:{bg}; color:{fg}; padding:2px 10px; border-radius:100px; font-weight:800; font-size:0.7rem; text-transform:uppercase; margin-right:8px;">{item['type']}</span>
-                    <strong style="color:#060B17;">{item['title']}</strong>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    # ─── Соцсети · живые подписчики по площадкам (БЕЗ Content Factory) ───────
+    st.markdown('<div class="section-label" style="margin-top:24px;">📱 Соцсети · подписчики сейчас</div>', unsafe_allow_html=True)
+    if brand.lower().startswith("beloved"):
+        try:
+            soc = socials.fetch_all(socials.BRAND_HANDLES)
+        except Exception:
+            soc = {}
+        plat_labels = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
+                       "pinterest": "Pinterest", "facebook": "Facebook"}
+        soc_cols = st.columns(len(plat_labels))
+        for i, (plat, lab) in enumerate(plat_labels.items()):
+            human = (soc.get(plat) or {}).get("human", "—")
+            soc_cols[i].metric(lab, human)
+        st.caption("Тянется с публичных страниц (без логина), кэш 1 ч. «—» = площадка временно "
+                   "не отдала данные (TikTok/IG иногда режут серверные запросы) — динамику смотри в "
+                   "Google-отчёте выше. Content Factory сюда НЕ входит (отдельный массовый канал).")
     else:
-        st.caption("Сегодня в КП пусто — открой Content Plan чтобы добавить.")
+        st.caption("Живые подписчики настроены для BelovedPets. Для Tobydic пришли хэндлы соцсетей — добавлю.")
+
+    # ─── Контент-план · сводка (отдельный сборщик plan_stats) ───────────────
+    ps = plan_stats.summarize_plan(brand)
+    st.markdown('<div class="section-label" style="margin-top:28px;">📅 Контент-план · сводка</div>', unsafe_allow_html=True)
+    kc = st.columns(4)
+    kc[0].metric("Постов в плане", ps["total"])
+    kc[1].metric("С ТЗ", ps["with_brief"], delta=(f'{ps["brief_pct"]}%' if ps["total"] else None))
+    kc[2].metric("Без ТЗ", len(ps["no_brief"]))
+    kc[3].metric("На этой неделе", len(ps["this_week"]))
+    if ps["total"]:
+        b1, b2 = st.columns(2)
+        b1.caption("По исполнителям:")
+        b1.markdown("  ·  ".join(f"**{k}** — {v}" for k, v in ps["by_owner"].items()) or "—")
+        b2.caption("По типам:")
+        b2.markdown("  ·  ".join(f"**{k}** — {v}" for k, v in ps["by_type"].items()) or "—")
+    if ps["this_week"]:
+        st.caption("На этой неделе:")
+        for it in ps["this_week"]:
+            mark = "💬" if it["has_brief"] else "✍️ (нет ТЗ)"
+            st.markdown(f'{mark} **{it["date"]}** · {it["title"]} · 🎬 {it["owner"]}')
+    else:
+        st.caption("На этой неделе постов в плане нет — открой Content Plan, чтобы добавить.")
 
     # ─── Pipeline snapshot ──────────────────────────────────────────────────
     concepts = load_concepts()
