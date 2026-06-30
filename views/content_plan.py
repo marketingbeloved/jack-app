@@ -626,9 +626,30 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         plan_briefs.save(pid, new, title=item["title"], pillar=item["pillar"],
                          updated=_now(), link=link)
         st.rerun()
-    if has and b2.button("🗑 Удалить", key=f"del_{pid}", use_container_width=True):
+    if has and b2.button("🗑 Удалить ТЗ", key=f"del_{pid}", use_container_width=True,
+                         help="Удалить только текст ТЗ (сам пост в плане останется)."):
         plan_briefs.delete(pid)
         st.rerun()
+
+    # ─── Удалить ВЕСЬ пост из плана (с подтверждением, чтобы не снести случайно) ──
+    st.markdown("---")
+    _ck = f"delpost_confirm_{pid}"
+    if not st.session_state.get(_ck):
+        if st.button("🗑 Удалить пост из плана", key=f"delpost_{pid}", use_container_width=True,
+                     help="Убрать эту тему из календаря целиком (вместе с ТЗ), у всей команды."):
+            st.session_state[_ck] = True
+            st.rerun()
+    else:
+        st.warning(f"Удалить «{item['title']}» ({day_key}) из плана? Уберётся пост и его ТЗ — у всех.")
+        dc1, dc2 = st.columns(2)
+        if dc1.button("✅ Да, удалить", key=f"delpost_yes_{pid}", use_container_width=True, type="primary"):
+            plan_briefs.delete(pid)                 # заодно убираем ТЗ, чтоб не висело сиротой
+            delete_plan_post(brand, day_key, pid)   # убираем пост из общего плана
+            st.session_state.pop(_ck, None)
+            st.rerun()
+        if dc2.button("Отмена", key=f"delpost_no_{pid}", use_container_width=True):
+            st.session_state.pop(_ck, None)
+            st.rerun()
 
 
 def _legend_pill(t: str, desc: str) -> str:
