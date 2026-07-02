@@ -293,7 +293,7 @@ def _save_plan(brand: str, plan: dict) -> None:
 
 
 def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str,
-                  owner: str = "") -> None:
+                  owner: str = "") -> str:
     import uuid
     plan = load_plan(brand)
     pid = f"{brand[:2].lower()}{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}"
@@ -301,6 +301,7 @@ def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str
         {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip(),
          "owner": owner})
     _save_plan(brand, plan)
+    return pid
 
 
 def set_plan_owner(brand: str, date_key: str, pid: str, owner: str) -> None:

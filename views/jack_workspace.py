@@ -230,6 +230,41 @@ def render():
         if _has_job:
             _poll_active_job()
 
+        # ─── Черновик Джека → СРАЗУ в контент-план (без цепочки апрува) ─────
+        _draft = st.session_state.get("draft_concept")
+        if _draft and not st.session_state.get("active_job"):
+            from datetime import date as _date
+            with st.container(border=True):
+                st.markdown(f"📌 **Черновик Джека:** {_draft.get('title','рилс')}")
+                dcol1, dcol2 = st.columns([1.3, 1])
+                _pd = dcol1.date_input("Дата в КП", value=_date.today(),
+                                       key="draft_plan_date", label_visibility="collapsed")
+                if dcol2.button("📅 Поставить в КП", key="draft_to_plan",
+                                use_container_width=True, type="primary"):
+                    from views import content_plan
+                    from models import plan_briefs
+                    _b = _draft.get("brand", brand)
+                    _dk = _pd.strftime("%d.%m")
+                    _pid = content_plan.add_plan_post(
+                        _b, _dk, _draft.get("title", "рилс"),
+                        _pillar_to_type(_draft.get("pillar", "")),
+                        _draft.get("pillar", ""), owner="dina")
+                    # прицепляем сам скрипт как ТЗ к новому посту — чтобы не потерялся
+                    _scr = "\n".join(_draft.get("scenes", []) or [])
+                    _txt = (f"**{_draft.get('title','')}**\nHook: {_draft.get('hook','')}\n\n"
+                            f"{_scr}\n\nCTA: {_draft.get('cta','')}")
+                    try:
+                        plan_briefs.save(_pid, _txt, title=_draft.get("title", ""),
+                                         pillar=_draft.get("pillar", ""), updated=_now_hm())
+                    except Exception:
+                        pass
+                    st.session_state["ws_messages"].append({"who": "jack", "text": (
+                        f"✓ Поставил «{_draft.get('title','рилс')}» в контент-план на {_dk} "
+                        f"(🎬 Дина), скрипт сохранил в ТЗ. Видит вся команда."), "time": _now_hm()})
+                    st.session_state.pop("draft_concept", None)
+                    st.rerun()
+                st.caption("Одной кнопкой на календарь. Или «сохрани в апрув» — если хочешь через очередь одобрения.")
+
         # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
         try:
             from models import shared_store
