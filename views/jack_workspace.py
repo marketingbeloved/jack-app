@@ -61,6 +61,42 @@ def _now_hm() -> str:
     return datetime.now().strftime("%H:%M")
 
 
+def _now_dt() -> str:
+    return datetime.now().strftime("%d.%m %H:%M")
+
+
+# ─── Хранилище подписей (Captions) — в общей базе, чтобы не терялись после сна вкладки ──
+def _captions_load(brand: str) -> list:
+    try:
+        from models import shared_store
+        return shared_store.get_json(f"captions_{brand.lower()}", []) or []
+    except Exception:
+        return []
+
+
+def _captions_save(brand: str, product: str, market: str, text: str) -> None:
+    if not (text or "").strip():
+        return
+    try:
+        from models import shared_store
+        items = _captions_load(brand)
+        items.insert(0, {"ts": _now_dt(), "product": product, "market": market, "text": text})
+        shared_store.put_json(f"captions_{brand.lower()}", items[:30])  # держим последние 30
+    except Exception:
+        pass
+
+
+def _captions_delete(brand: str, idx: int) -> None:
+    try:
+        from models import shared_store
+        items = _captions_load(brand)
+        if 0 <= idx < len(items):
+            items.pop(idx)
+            shared_store.put_json(f"captions_{brand.lower()}", items)
+    except Exception:
+        pass
+
+
 def _launch_bg_generation(req: dict, t: str) -> None:
     """Запустить генерацию рилса В ФОНЕ (отдельный поток) + показать, что Джек пишет.
     Результат подтянет polling-фрагмент — даже если соединение сбросится или вкладку
@@ -553,6 +589,9 @@ def render():
                             )
                         st.session_state["caption_media_result"] = cap_txt
                         st.session_state["caption_media_n"] = st.session_state.get("caption_media_n", 0) + 1
+                        # СОХРАНЯЕМ подпись в общую базу — чтобы не пропала после перезагрузки/сна
+                        if not cap_txt.startswith("⚠️"):
+                            _captions_save(brand, cap_product.strip(), cap_market, cap_txt)
             if st.session_state.get("caption_media_result"):
                 st.markdown("---")
                 _n = st.session_state.get("caption_media_n", 0)
@@ -561,6 +600,22 @@ def render():
                              height=340, key=f"caption_media_edit_{_n}")
                 st.caption("✏️ Можно править текст прямо в поле, потом выделить и скопировать. "
                            "Перегенерить — поправь «что в кадре» и жми «Написать подпись».")
+
+            # ─── 🗂 Сохранённые подписи — не теряются, копируй снова / удаляй ──
+            _saved_caps = _captions_load(brand)
+            if _saved_caps:
+                st.markdown("---")
+                st.markdown(f"**🗂 Сохранённые подписи ({len(_saved_caps)})** — скопировать снова или удалить")
+                for _ci, _cap in enumerate(_saved_caps):
+                    _head = " · ".join(x for x in [_cap.get("product") or "подпись",
+                                                   _cap.get("market", ""), _cap.get("ts", "")] if x)
+                    cc1, cc2 = st.columns([5, 1])
+                    cc1.caption(f"#{_ci + 1} · {_head}")
+                    if cc2.button("🗑", key=f"delcap_{brand}_{_ci}", help="Удалить эту подпись"):
+                        _captions_delete(brand, _ci)
+                        st.rerun()
+                    st.text_area("сохранённая подпись", value=_cap.get("text", ""), height=170,
+                                 key=f"savedcap_{brand}_{_ci}", label_visibility="collapsed")
 
     # ─── Tabs below — queues + context ──────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:32px;">Pipeline</div>', unsafe_allow_html=True)
