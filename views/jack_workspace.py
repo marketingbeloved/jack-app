@@ -436,7 +436,11 @@ def render():
                     from models.jack_engine import promote_to_approve
                     promote_to_approve(st.session_state["draft_concept"])
                     title = st.session_state["draft_concept"].get("title", "—")
-                    reply = f"✓ Сохранил «{title}» в Approve — теперь в Pipeline → 🟡 To approve. Дальше — твой ✅ Approve и я пушаю Дине в Notion."
+                    reply = (
+                        f"✓ Сохранил «{title}» в Approve — теперь в Pipeline → 🟡 To approve. "
+                        f"Жми ✅ Approve: если у концепта уже есть ссылки Drive (фото товара) + listing — "
+                        f"я сразу оформлю ТЗ Дине в Notion. Если ссылок нет — попрошу их прямо там, в разделе Approved, и запушу."
+                    )
                     st.session_state.pop("draft_concept", None)
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
                     st.session_state["jack_mood"] = "happy"
@@ -888,6 +892,16 @@ def _render_approve_kanban():
                                 break
                         _cf.write_text(_j.dumps(all_c, ensure_ascii=False, indent=2), encoding="utf-8")
                         _dc(cap_res[0].get("id", ""))
+                # Автопуш Дине в Notion: если у концепта уже есть Drive+listing —
+                # оформляем ТЗ сразу, без второй кнопки. Если ссылок нет — ниже в
+                # разделе ✅ Approved Джек попросит их и запушит.
+                from models.jack_engine import autopush_to_notion, load_concepts as _lcap
+                _fresh = next((x for x in _lcap() if x.get("id") == c["id"]), c)
+                _ap = autopush_to_notion(_fresh)
+                if _ap.get("url"):
+                    st.success("📄 ТЗ сразу ушло Дине в Notion")
+                elif _ap.get("error"):
+                    st.warning(f"⚠️ В Notion не ушло: {_ap['error']}")
                 st.rerun()
             if bc2.button("🔄 Переписать", key=f"edt_{c['id']}", use_container_width=True, type="primary",
                           help="Jack перепишет скрипт с твоими правками. Сначала напиши правку в поле выше."):

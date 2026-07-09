@@ -922,3 +922,28 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
         return {"error": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"error": f"Notion write failed: {e}"}
+
+
+def autopush_to_notion(concept: dict, end_date: str | None = None) -> dict:
+    """Push an approved concept to Dina's Notion автоматически — НО только если
+    у концепта уже есть обе ссылки (Drive с фото товара + listing). Сохраняет
+    notion_url на концепте при успехе, чтобы не запушить дважды.
+
+    Возвращает:
+      {"url": ...}         — оформил ТЗ в Notion прямо сейчас
+      {"skipped": "..."}   — нечего пушить (уже в Notion / нет ссылок) — это НЕ ошибка
+      {"error": ...}       — Notion write не удался (напр. нет NOTION_TOKEN в secrets)
+    """
+    if not concept:
+        return {"skipped": "нет концепта"}
+    if concept.get("notion_url"):
+        return {"skipped": "уже в Notion"}
+    links = concept.get("links") or {}
+    drive = str(links.get("product_pics_drive", "")).strip()
+    listing = str(links.get("listing_url", "")).strip()
+    if not (drive.startswith("http") and listing.startswith("http")):
+        return {"skipped": "нет ссылок (Drive+listing) — нужны от Дарьи"}
+    res = publish_to_notion(concept, drive, listing, end_date)
+    if res and res.get("url"):
+        set_concept_fields(concept["id"], notion_url=res["url"])
+    return res
