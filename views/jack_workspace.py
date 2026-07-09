@@ -299,7 +299,30 @@ def render():
                         f"(🎬 Дина), скрипт сохранил в ТЗ. Видит вся команда."), "time": _now_hm()})
                     st.session_state.pop("draft_concept", None)
                     st.rerun()
-                st.caption("Одной кнопкой на календарь. Или «сохрани в апрув» — если хочешь через очередь одобрения.")
+                # ─── Прямая кнопка: оформить ТЗ Дине в Notion сразу из черновика ───
+                if st.button("📨 Создать ТЗ Дине в Notion", key="draft_to_notion",
+                             use_container_width=True):
+                    from models.jack_engine import (
+                        promote_to_approve, update_status, autopush_to_notion,
+                        load_concepts as _lcn,
+                    )
+                    promote_to_approve(_draft)
+                    update_status(_draft["id"], "approved")
+                    _fresh = next((x for x in _lcn() if x.get("id") == _draft.get("id")), _draft)
+                    with st.spinner("🐾 Джек оформляет ТЗ Дине в Notion…"):
+                        _ap = autopush_to_notion(_fresh)
+                    if _ap.get("url"):
+                        _msg = (f"✓ Готово — ТЗ «{_draft.get('title','—')}» у Дины в Notion (база Videos):\n"
+                                f"{_ap['url']}")
+                    elif _ap.get("skipped"):
+                        _msg = f"«{_draft.get('title','—')}» уже лежит у Дины в Notion — не дублирую."
+                    else:
+                        _msg = (f"⚠️ Не смог записать в Notion: {_ap.get('error','неизвестная ошибка')}. "
+                                f"Проверь NOTION_TOKEN в secrets и что приложение перезагружено.")
+                    st.session_state["ws_messages"].append({"who": "jack", "text": _msg, "time": _now_hm()})
+                    st.session_state.pop("draft_concept", None)
+                    st.rerun()
+                st.caption("🎬 «Создать ТЗ Дине» — оформит скрипт в Notion Дине сразу. 📅 «Поставить в КП» — в контент-план на дату. Обычно нужно и то, и то.")
 
         # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
         try:
