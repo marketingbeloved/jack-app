@@ -144,7 +144,7 @@ def _poll_active_job() -> None:
             f"Окей, набросал — **{c.get('title','—')}**\n\nИдея: {c.get('angle','—')}\n\n"
             f"**Script:**\n{scenes}\n\nCTA: {c.get('cta','—')}"
             + (f"\n\nПочему сработает: {why}" if why else "")
-            + "\n\nСкажи что поменять — перепишу. Финал — напиши «сохрани в апрув»."), "time": _now_hm()})
+            + "\n\nСкажи что поменять — перепишу. Готово? Напиши «создай ТЗ Дине в Notion» — оформлю ей сразу."), "time": _now_hm()})
     else:
         st.session_state["ws_messages"].append({"who": "jack", "text": (
             f"Хм, не получилось — {job.get('error','')}. Нажми «Написать рилс сейчас» ещё раз."), "time": _now_hm()})
