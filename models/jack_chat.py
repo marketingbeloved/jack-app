@@ -110,8 +110,16 @@ def brief_has_product(text: str) -> bool:
     """True if the message names a concrete product Jack can build a brief around.
 
     Used to stop Jack from guessing a SKU on a vague brief like «сделай про сон».
+    Сначала быстрые англ. ключевые слова, затем резолвер каталога (рус/англ):
+    «салфетки», «успокоительное» и т.п. → товар из библиотеки, Джек не переспрашивает.
     """
-    return any(p in text.lower() for p in PRODUCT_KEYWORDS)
+    if any(p in text.lower() for p in PRODUCT_KEYWORDS):
+        return True
+    try:
+        from models.products import resolve_products
+        return bool(resolve_products(text))
+    except Exception:
+        return False
 
 
 # Brief types that legitimately have NO product/SKU — don't ask «по какому товару?».

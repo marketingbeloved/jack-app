@@ -95,3 +95,52 @@ def safe_phrases(p: dict) -> list[str]:
 def forbidden_phrases(p: dict) -> list[str]:
     cat_rules = p.get("compliance", {}).get("category_rules", {})
     return list(cat_rules.get("forbidden_phrases", []))
+
+
+# ─── Резолвер товара из описания задачи (рус/англ) ──────────────────────────
+# Дарья пишет «сделай рилс про салфетки» — Джек должен сам найти товар в каталоге,
+# а не переспрашивать. Ключ = стем/слово в тексте (рус или англ), значение =
+# поисковый термин по каталогу (совпадает с англ. title/description_short).
+_PRODUCT_HINTS = {
+    "салфетк": "wipe", "вайпс": "wipe", "wipe": "wipe", "pads": "wipe",
+    "капл": "eye wash", "промыв": "eye wash", "глаз": "eye", "eye wash": "eye wash", "tear stain": "tear",
+    "успокоит": "calming", "калминг": "calming", "стресс": "calming", "тревог": "calming",
+    "calm": "calming", "anxiet": "calming",
+    "масло": "hemp", "конопл": "hemp", "гемп": "hemp", "hemp": "hemp",
+    "дрожж": "yeast", "yeast": "yeast", "уши": "ear", "ушн": "ear", "ear": "ear",
+    "блох": "flea", "flea": "flea", "клещ": "tick", "tick": "tick",
+    "пробиотик": "probiotic", "probiotic": "probiotic", "кишеч": "intestinal",
+    "жкт": "intestinal", "пищевар": "digest", "intestinal": "intestinal",
+    "зуб": "dental", "dental": "dental", "полост": "dental",
+    "лакомств": "treat", "вкусняшк": "treat", "джерки": "jerky", "jerky": "jerky",
+    "treats": "treat", "chew": "chew",
+    "сустав": "joint", "joint": "joint", "хондро": "joint",
+    "витамин": "multivitamin", "мультивитамин": "multivitamin", "multivitamin": "multivitamin",
+    "шерст": "skin", "кож": "skin", "skin": "skin", "coat": "coat",
+    "uti": "uti", "мочев": "urinary", "цистит": "urinary", "urinary": "urinary",
+    "spray": "spray", "спрей": "spray",
+}
+
+
+def resolve_products(text: str, limit: int = 4) -> list[dict]:
+    """По описанию задачи (рус/англ) найти товары в каталоге.
+
+    «салфетки» → Eye Wash Wipes, «успокоительное» → Calming Chews и т.п.
+    Возвращает список совпавших товаров (пусто — если ничего не опознано).
+    Используется, чтобы Джек НЕ переспрашивал товар, когда он однозначен.
+    """
+    t = (text or "").lower()
+    terms = []
+    for stem, term in _PRODUCT_HINTS.items():
+        if stem in t and term not in terms:
+            terms.append(term)
+    out, seen = [], set()
+    for term in terms:
+        for p in list_products(search=term):
+            pid = p.get("id")
+            if pid and pid not in seen:
+                seen.add(pid)
+                out.append(p)
+                if len(out) >= limit:
+                    return out
+    return out

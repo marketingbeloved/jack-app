@@ -29,6 +29,20 @@ def _linkify(text: str) -> str:
     return _URL_RE.sub(_repl, text or "")
 
 
+def _products_for(text: str) -> list:
+    """Опознать товар(ы) из текста задачи через каталог (рус/англ).
+    Возвращает короткие названия для запроса генерации; если не опознано —
+    ['см. запрос'] (Джек возьмёт из контекста как раньше)."""
+    try:
+        from models.products import resolve_products, short_title
+        matched = resolve_products(text)
+        if matched:
+            return [short_title(p) for p in matched]
+    except Exception:
+        pass
+    return ["см. запрос"]
+
+
 def _signals_ready_to_write(reply: str) -> bool:
     """Джек в чате сказал «иду писать» → это сигнал запустить генерацию по диалогу."""
     t = (reply or "").lower()
@@ -390,7 +404,7 @@ def render():
             all_txt = " ".join(m.get("text", "") for m in _said)
             req = {
                 "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
-                "products": ["см. запрос"],
+                "products": _products_for(all_txt),
                 "pillars": ["Amazon Video"] if "amazon" in all_txt.lower() else [],
                 "context": _assemble_brief_from_chat(st.session_state["ws_messages"]),
             }
@@ -557,7 +571,7 @@ def render():
                         )
                     req = {
                         "brand": effective_brand, "n": 1, "markets": [_market_from_text(user_text)],
-                        "products": ["см. запрос"],
+                        "products": _products_for(user_text),
                         "pillars": ["Amazon Video"] if "amazon" in user_text.lower() else [],
                         "context": ctx,
                     }
@@ -580,7 +594,7 @@ def render():
                         req = {
                             "brand": effective_brand, "n": 1,
                             "markets": [_market_from_text(all_darya)],
-                            "products": ["см. запрос"],
+                            "products": _products_for(all_darya),
                             "pillars": ["Amazon Video"] if "amazon" in all_darya.lower() else [],
                             "context": _assemble_brief_from_chat(st.session_state["ws_messages"], refs_context),
                         }
