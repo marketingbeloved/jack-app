@@ -1,6 +1,7 @@
 """Jack Workspace — Darya and Tanya talk to Jack here. Lottie animated Jack on the side."""
 
 import html
+import re
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -14,6 +15,18 @@ from models.jack_engine import load_concepts, update_status, delete_concept
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+_URL_RE = re.compile(r'(https?://[^\s<]+)')
+
+
+def _linkify(text: str) -> str:
+    """URL в сообщении → кликабельная ссылка (ссылку на ТЗ в Notion делаем кнопкой-текстом)."""
+    def _repl(m):
+        url = m.group(1)
+        label = "🔗 Открыть ТЗ в Notion" if "notion" in url else url
+        return (f'<a href="{url}" target="_blank" '
+                f'style="color:#1B339E;font-weight:700;text-decoration:underline;">{label}</a>')
+    return _URL_RE.sub(_repl, text or "")
 
 
 def _signals_ready_to_write(reply: str) -> bool:
@@ -246,7 +259,7 @@ def render():
             who = msg["who"]
             if who == "jack":
                 st.markdown(
-                    f'<div class="msg jack-msg"><div class="msg-label">🐾 Jack · {msg["time"]}</div>{msg["text"]}</div>',
+                    f'<div class="msg jack-msg"><div class="msg-label">🐾 Jack · {msg["time"]}</div>{_linkify(msg["text"])}</div>',
                     unsafe_allow_html=True,
                 )
             else:
