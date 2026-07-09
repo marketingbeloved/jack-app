@@ -433,25 +433,37 @@ def render():
                     "дине в notion", "дине в ноуш", "дине в ноушн", "отправь дине",
                     "пушай в notion", "пушни в notion", "в ноушн дине", "создай ноушн",
                 ]
-                if any(tr in user_text.lower() for tr in notion_triggers) and st.session_state.get("draft_concept"):
+                if any(tr in user_text.lower() for tr in notion_triggers):
                     from models.jack_engine import promote_to_approve, update_status, autopush_to_notion, load_concepts as _lcn
-                    _draft = st.session_state["draft_concept"]
-                    promote_to_approve(_draft)                 # сохранить (проставит id)
-                    update_status(_draft["id"], "approved")    # сразу approved
-                    _fresh = next((x for x in _lcn() if x.get("id") == _draft.get("id")), _draft)
-                    with st.spinner("🐾 Джек оформляет ТЗ Дине в Notion…"):
-                        _ap = autopush_to_notion(_fresh)
-                    title = _draft.get("title", "—")
-                    if _ap.get("url"):
-                        reply = f"✓ Готово — ТЗ «{title}» у Дины в Notion (база Videos):\n{_ap['url']}"
-                        st.session_state["jack_mood"] = "happy"
-                    elif _ap.get("skipped"):
-                        reply = f"«{title}» уже лежит у Дины в Notion — не дублирую."
-                        st.session_state["jack_mood"] = "happy"
+                    _draft = st.session_state.get("draft_concept")
+                    if _draft:
+                        # Свежий концепт прямо из чата → сохранить и запушить его.
+                        promote_to_approve(_draft)                 # сохранить (проставит id)
+                        update_status(_draft["id"], "approved")    # сразу approved
+                        _target_id = _draft.get("id")
                     else:
-                        reply = (f"⚠️ Не смог записать в Notion: {_ap.get('error','неизвестная ошибка')}. "
-                                 f"Концепт сохранил в Approve — попробуй ещё раз через минуту.")
+                        # Нет чат-драфта → берём самый свежий концепт, которого ещё нет в Notion.
+                        _cands = [x for x in _lcn() if not x.get("notion_url")]
+                        _target_id = _cands[0].get("id") if _cands else None
+                    _fresh = next((x for x in _lcn() if x.get("id") == _target_id), None) if _target_id else None
+                    if not _fresh:
+                        reply = ("Пока нечего отправлять Дине — сначала пришли бриф, я сделаю концепт, "
+                                 "потом скажи «создай ТЗ Дине в Notion». Или одобри концепт в Pipeline (✅ Approve).")
                         st.session_state["jack_mood"] = "neutral"
+                    else:
+                        with st.spinner("🐾 Джек оформляет ТЗ Дине в Notion…"):
+                            _ap = autopush_to_notion(_fresh)
+                        title = _fresh.get("title", "—")
+                        if _ap.get("url"):
+                            reply = f"✓ Готово — ТЗ «{title}» у Дины в Notion (база Videos):\n{_ap['url']}"
+                            st.session_state["jack_mood"] = "happy"
+                        elif _ap.get("skipped"):
+                            reply = f"«{title}» уже лежит у Дины в Notion — не дублирую."
+                            st.session_state["jack_mood"] = "happy"
+                        else:
+                            reply = (f"⚠️ Не смог записать в Notion: {_ap.get('error','неизвестная ошибка')}. "
+                                     f"Проверь, что NOTION_TOKEN есть в secrets и приложение перезагружено.")
+                            st.session_state["jack_mood"] = "neutral"
                     st.session_state.pop("draft_concept", None)
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
                     st.rerun()
