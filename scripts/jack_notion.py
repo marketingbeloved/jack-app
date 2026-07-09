@@ -188,22 +188,22 @@ VALID_MARKETS = {"US", "UK", "CA"}
 
 
 def _product_block(product_name: str, market: str, drive_url: str, listing_url: str) -> list:
-    """Информация о товаре + рынок + Drive + listing в начале страницы.
+    """Опциональная шапка страницы: товар/рынок + Drive + listing.
 
-    Согласно памяти bp-notion-format: любое ТЗ для Дины ВСЕГДА должно включать
-    название товара, Drive-ссылку на материалы и listing-ссылку для CTA-контекста.
+    Любое поле может быть пустым — Дина берёт материалы с общего Диска сама,
+    поэтому ссылки НЕ обязательны. Показываем только то, что реально передали.
     """
-    blocks = [_paragraph(f"Товар: {product_name}  ·  Рынок: {market}")]
-    blocks.append({
-        "object": "block",
-        "type": "bookmark",
-        "bookmark": {"url": drive_url, "caption": []},
-    })
-    blocks.append({
-        "object": "block",
-        "type": "bookmark",
-        "bookmark": {"url": listing_url, "caption": []},
-    })
+    blocks = []
+    if product_name and market:
+        blocks.append(_paragraph(f"Товар: {product_name}  ·  Рынок: {market}"))
+    elif product_name:
+        blocks.append(_paragraph(f"Товар: {product_name}"))
+    elif market:
+        blocks.append(_paragraph(f"Рынок: {market}"))
+    if drive_url:
+        blocks.append({"object": "block", "type": "bookmark", "bookmark": {"url": drive_url, "caption": []}})
+    if listing_url:
+        blocks.append({"object": "block", "type": "bookmark", "bookmark": {"url": listing_url, "caption": []}})
     return blocks
 
 
@@ -231,14 +231,9 @@ def create_reel_brief(
 
     Возвращает dict с полями id, url.
     """
-    if not product_name:
-        raise ValueError("product_name обязателен. Дина не угадает что снимать без названия товара.")
-    if not drive_url:
-        raise ValueError("drive_url обязателен. Дина теряет время если ищет материалы вручную.")
-    if not listing_url:
-        raise ValueError("listing_url обязателен. Без него нет контекста для CTA в финальной сцене.")
+    # Ссылки и товар НЕ обязательны — Дина берёт материалы с общего Диска сама.
     if market not in VALID_MARKETS:
-        raise ValueError(f"market должен быть US / UK / CA, получено: {market!r}")
+        market = "US"
 
     scenes = scenes or []
     action_items = action_items or [""]
@@ -288,14 +283,9 @@ def create_static_brief(
 
     Обязательно: title + product_name + market + drive_url + listing_url.
     """
-    if not product_name:
-        raise ValueError("product_name обязателен. Дина не угадает что снимать без названия товара.")
-    if not drive_url:
-        raise ValueError("drive_url обязателен. Дина теряет время если ищет материалы вручную.")
-    if not listing_url:
-        raise ValueError("listing_url обязателен. Без него нет контекста для CTA.")
+    # Ссылки и товар НЕ обязательны — Дина берёт материалы с общего Диска сама.
     if market not in VALID_MARKETS:
-        raise ValueError(f"market должен быть US / UK / CA, получено: {market!r}")
+        market = "US"
 
     action_items = action_items or [""]
     documents_urls = documents_urls or []

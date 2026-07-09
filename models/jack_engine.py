@@ -888,10 +888,9 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
     except Exception as e:  # noqa: BLE001
         return {"error": f"Notion module not importable: {e}"}
 
+    # Ссылки НЕ обязательны — Дина берёт материалы с общего Диска сама.
     drive_url = (drive_url or "").strip()
     listing_url = (listing_url or "").strip()
-    if not drive_url or not listing_url:
-        return {"error": "Нужны обе ссылки — Drive (фото товара) и listing (Amazon/Shopify)."}
 
     title = concept.get("title", "").strip() or "(untitled)"
     product = concept.get("product", "").strip() or concept.get("product_name", "").strip()
@@ -925,13 +924,13 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
 
 
 def autopush_to_notion(concept: dict, end_date: str | None = None) -> dict:
-    """Push an approved concept to Dina's Notion автоматически — НО только если
-    у концепта уже есть обе ссылки (Drive с фото товара + listing). Сохраняет
-    notion_url на концепте при успехе, чтобы не запушить дважды.
+    """Оформить ТЗ Дине в Notion автоматически. Ссылки НЕ обязательны — если они
+    есть у концепта, прикрепим; нет — Дина берёт материалы с Диска сама.
+    Сохраняет notion_url на концепте при успехе, чтобы не запушить дважды.
 
     Возвращает:
       {"url": ...}         — оформил ТЗ в Notion прямо сейчас
-      {"skipped": "..."}   — нечего пушить (уже в Notion / нет ссылок) — это НЕ ошибка
+      {"skipped": "..."}   — уже в Notion (не ошибка)
       {"error": ...}       — Notion write не удался (напр. нет NOTION_TOKEN в secrets)
     """
     if not concept:
@@ -941,8 +940,6 @@ def autopush_to_notion(concept: dict, end_date: str | None = None) -> dict:
     links = concept.get("links") or {}
     drive = str(links.get("product_pics_drive", "")).strip()
     listing = str(links.get("listing_url", "")).strip()
-    if not (drive.startswith("http") and listing.startswith("http")):
-        return {"skipped": "нет ссылок (Drive+listing) — нужны от Дарьи"}
     res = publish_to_notion(concept, drive, listing, end_date)
     if res and res.get("url"):
         set_concept_fields(concept["id"], notion_url=res["url"])

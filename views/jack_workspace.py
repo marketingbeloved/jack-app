@@ -426,10 +426,40 @@ def render():
                 # Brand auto-detection from sender: Tanya → Tobydic, others → current sidebar brand
                 effective_brand = "Tobydic" if sender.lower() == "tanya" else brand
 
-                # Promotion triggers — Darya wants the in-chat draft saved to Approve
+                # Notion-push triggers — Дарья прямо говорит «иди создай ТЗ Дине в Notion».
+                # Оформляем ТЗ в базе Videos СРАЗУ (ссылки не обязательны — Дина берёт с Диска).
+                notion_triggers = [
+                    "создай тз", "оформи тз", "иди создай", "тз дине", "тз для дины",
+                    "дине в notion", "дине в ноуш", "дине в ноушн", "отправь дине",
+                    "пушай в notion", "пушни в notion", "в ноушн дине", "создай ноушн",
+                ]
+                if any(tr in user_text.lower() for tr in notion_triggers) and st.session_state.get("draft_concept"):
+                    from models.jack_engine import promote_to_approve, update_status, autopush_to_notion, load_concepts as _lcn
+                    _draft = st.session_state["draft_concept"]
+                    promote_to_approve(_draft)                 # сохранить (проставит id)
+                    update_status(_draft["id"], "approved")    # сразу approved
+                    _fresh = next((x for x in _lcn() if x.get("id") == _draft.get("id")), _draft)
+                    with st.spinner("🐾 Джек оформляет ТЗ Дине в Notion…"):
+                        _ap = autopush_to_notion(_fresh)
+                    title = _draft.get("title", "—")
+                    if _ap.get("url"):
+                        reply = f"✓ Готово — ТЗ «{title}» у Дины в Notion (база Videos):\n{_ap['url']}"
+                        st.session_state["jack_mood"] = "happy"
+                    elif _ap.get("skipped"):
+                        reply = f"«{title}» уже лежит у Дины в Notion — не дублирую."
+                        st.session_state["jack_mood"] = "happy"
+                    else:
+                        reply = (f"⚠️ Не смог записать в Notion: {_ap.get('error','неизвестная ошибка')}. "
+                                 f"Концепт сохранил в Approve — попробуй ещё раз через минуту.")
+                        st.session_state["jack_mood"] = "neutral"
+                    st.session_state.pop("draft_concept", None)
+                    st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
+                    st.rerun()
+
+                # Promotion triggers — Darya wants the in-chat draft saved to Approve (без Notion)
                 promote_triggers = [
                     "сохрани", "добавь в апрув", "в апрув", "в план", "в кп",
-                    "пушай в notion", "финал", "это финал", "ок сохрани",
+                    "финал", "это финал", "ок сохрани",
                     "ок добавь", "добавь это", "это в апрув", "save", "promote",
                 ]
                 if any(tr in user_text.lower() for tr in promote_triggers) and st.session_state.get("draft_concept"):
@@ -437,9 +467,8 @@ def render():
                     promote_to_approve(st.session_state["draft_concept"])
                     title = st.session_state["draft_concept"].get("title", "—")
                     reply = (
-                        f"✓ Сохранил «{title}» в Approve — теперь в Pipeline → 🟡 To approve. "
-                        f"Жми ✅ Approve: если у концепта уже есть ссылки Drive (фото товара) + listing — "
-                        f"я сразу оформлю ТЗ Дине в Notion. Если ссылок нет — попрошу их прямо там, в разделе Approved, и запушу."
+                        f"✓ Сохранил «{title}» в Approve (Pipeline → 🟡 To approve). "
+                        f"Когда скажешь «создай ТЗ Дине в Notion» — сразу оформлю ей в базе Videos."
                     )
                     st.session_state.pop("draft_concept", None)
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
@@ -1098,25 +1127,26 @@ def _render_approve_kanban():
                     st.link_button("Открыть в Notion", notion_url)
                     continue
 
-                # Jack asks Darya for the links Dina needs, then writes the brief
+                # Ручная отправка (fallback, если автопуш не сработал). Ссылки
+                # НЕ обязательны — Дина берёт материалы с общего Диска сама.
                 st.markdown(
                     '<div style="font-size:0.86rem; color:#1B339E;">🐾 Джек: '
-                    'скрипт готов и апрувлен. Дай ссылки, которые нужны Дине — и я оформлю ТЗ в Notion '
-                    '(название как в КП, дата, скрипт, ссылки).</div>',
+                    'скрипт готов и апрувлен. Жми «Отправить ТЗ Дине» — оформлю в Notion сразу. '
+                    'Ссылки Drive/listing можно оставить пустыми (не обязательны).</div>',
                     unsafe_allow_html=True,
                 )
                 from datetime import date as _date
                 with st.form(f"send_dina_{c['id']}"):
                     drive_in = st.text_input(
-                        "📁 Drive — папка с фото товара (packshots)",
+                        "📁 Drive — папка с фото товара (необязательно)",
                         value=(c.get("links") or {}).get("product_pics_drive", "") if str((c.get("links") or {}).get("product_pics_drive", "")).startswith("http") else "",
-                        placeholder="https://drive.google.com/…",
+                        placeholder="можно пусто",
                         key=f"drive_{c['id']}",
                     )
                     listing_in = st.text_input(
-                        "🛒 Listing — товар на Amazon/Shopify (для CTA)",
+                        "🛒 Listing — товар на Amazon/Shopify (необязательно)",
                         value=(c.get("links") or {}).get("listing_url", "") if str((c.get("links") or {}).get("listing_url", "")).startswith("http") else "",
-                        placeholder="https://www.amazon.com/…",
+                        placeholder="можно пусто",
                         key=f"listing_{c['id']}",
                     )
                     date_in = st.date_input(
@@ -1126,24 +1156,16 @@ def _render_approve_kanban():
                     )
                     send = st.form_submit_button("📨 Отправить ТЗ Дине в Notion", type="primary", use_container_width=True)
                     if send:
-                        if not drive_in.strip() or not listing_in.strip():
-                            st.warning("Нужны обе ссылки — Drive (фото) и listing. Без них Дина не сможет начать.")
+                        from models.jack_engine import publish_to_notion, set_concept_fields
+                        with st.spinner("🐾 Джек оформляет ТЗ для Дины в Notion…"):
+                            res = publish_to_notion(c, drive_in.strip(), listing_in.strip(), date_in.isoformat())
+                        if res and res.get("url"):
+                            set_concept_fields(c["id"], notion_url=res["url"], links={
+                                **(c.get("links") or {}),
+                                "product_pics_drive": drive_in.strip(),
+                                "listing_url": listing_in.strip(),
+                            })
+                            st.success("✓ ТЗ ушло Дине в Notion!")
+                            st.rerun()
                         else:
-                            from models.jack_engine import publish_to_notion, load_concepts as _lc, CONCEPTS_FILE as _cf
-                            import json as _j
-                            with st.spinner("🐾 Джек оформляет ТЗ для Дины в Notion…"):
-                                res = publish_to_notion(c, drive_in.strip(), listing_in.strip(), date_in.isoformat())
-                            if res and res.get("url"):
-                                all_c = _lc()
-                                for item in all_c:
-                                    if item.get("id") == c["id"]:
-                                        item["notion_url"] = res["url"]
-                                        item.setdefault("links", {})
-                                        item["links"]["product_pics_drive"] = drive_in.strip()
-                                        item["links"]["listing_url"] = listing_in.strip()
-                                        break
-                                _cf.write_text(_j.dumps(all_c, ensure_ascii=False, indent=2), encoding="utf-8")
-                                st.success("✓ ТЗ ушло Дине в Notion!")
-                                st.rerun()
-                            else:
-                                st.error(f"Не получилось: {res.get('error','неизвестная ошибка') if res else 'нет ответа'}")
+                            st.error(f"Не получилось: {res.get('error','неизвестная ошибка') if res else 'нет ответа'}")
