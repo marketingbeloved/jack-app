@@ -8,7 +8,7 @@ import streamlit as st
 from models.geelark import health as geelark_health, list_phones as geelark_phones, get_phone
 from models.telegram_bot import health as tg_health, get_updates as tg_updates, count_approvals
 from models.socials import fetch_all as fetch_socials, BRAND_HANDLES
-from models.content_factory_data import fetch_year as cf_fetch_year, available_months as cf_months, build_lookup as cf_lookup
+from models.content_factory_data import fetch_year as cf_fetch_year, available_months as cf_months, build_lookup as cf_lookup, diagnose as cf_diagnose
 
 
 PHONES = [
@@ -114,6 +114,8 @@ def render():
     cf_month = None
     if cf_avail:
         cf_month = st.selectbox("📅 Metrics month", cf_avail, index=len(cf_avail) - 1)
+    else:
+        st.caption(f"ℹ️ Content Factory metrics source: {cf_diagnose()}")
     cf_data = cf_lookup(cf_rows, cf_month) if cf_month else {}
 
     # Brand-wide social followers (real, from public scrape)

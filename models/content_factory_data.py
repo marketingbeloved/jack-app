@@ -56,6 +56,27 @@ def fetch_year(year: int = 2026) -> list:
         return []
 
 
+def diagnose(year: int = 2026) -> dict:
+    """One-line health check for the Content Factory data source."""
+    sb = _supabase()
+    if not sb:
+        return {"ok": False, "why": "SUPABASE_URL/KEY not set in Streamlit secrets"}
+    url, key = sb
+    try:
+        import requests
+        r = requests.get(
+            f"{url}/rest/v1/content_factory_metrics",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            params={"select": "phone", "year": f"eq.{year}"},
+            timeout=20,
+        )
+        if r.status_code == 200:
+            return {"ok": True, "rows": len(r.json())}
+        return {"ok": False, "why": f"HTTP {r.status_code}: {r.text[:120]}"}
+    except Exception as e:
+        return {"ok": False, "why": f"request error: {str(e)[:120]}"}
+
+
 def available_months(rows: list) -> list:
     """Months present in `rows`, in calendar order."""
     present = {r.get("month") for r in rows}
