@@ -48,7 +48,7 @@ def fetch_year(year: int = 2026) -> list:
         r = requests.get(
             f"{url}/rest/v1/content_factory_metrics",
             headers={"apikey": key, "Authorization": f"Bearer {key}"},
-            params={"select": "phone,platform,metric,value_text,value_num", "year": f"eq.{year}"},
+            params={"select": "phone,platform,metric,month,year,value_text,value_num", "year": f"eq.{year}"},
             timeout=20,
         )
         return r.json() if r.status_code == 200 else []
