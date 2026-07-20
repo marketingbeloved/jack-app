@@ -8,6 +8,7 @@ import streamlit as st
 from models.geelark import health as geelark_health, list_phones as geelark_phones, get_phone
 from models.telegram_bot import health as tg_health, get_updates as tg_updates, count_approvals
 from models.socials import fetch_all as fetch_socials, BRAND_HANDLES
+from models.content_factory_data import fetch_year as cf_fetch_year, available_months as cf_months, build_lookup as cf_lookup
 
 
 PHONES = [
@@ -60,6 +61,15 @@ STORE_STYLE = {
 }
 
 
+def _fmt_val(v):
+    """Metric value for a leaf card: em dash if missing, thousands-separated if int."""
+    if v in (None, ""):
+        return "—"
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return f"{v:,}" if isinstance(v, int) else str(v)
+
+
 def render():
     st.markdown("# 🏭 Content Factory")
     st.caption("3 GeeLark phones · each branches into 4 social channels · live data via GeeLark API + Telegram bot.")
@@ -98,6 +108,14 @@ def render():
     live_phones = {str(p.get("id")): p for p in geelark_phones()}
     status_label = {1: ("🟢", "running"), 2: ("🟡", "stopped"), 3: ("🟠", "starting"), 4: ("🔴", "error")}
 
+    # Content Factory metrics from the SMM report (Supabase table content_factory_metrics)
+    cf_rows = cf_fetch_year(2026)
+    cf_avail = cf_months(cf_rows)
+    cf_month = None
+    if cf_avail:
+        cf_month = st.selectbox("📅 Metrics month", cf_avail, index=len(cf_avail) - 1)
+    cf_data = cf_lookup(cf_rows, cf_month) if cf_month else {}
+
     # Brand-wide social followers (real, from public scrape)
     brand_socials = fetch_socials(BRAND_HANDLES)
 
@@ -118,6 +136,10 @@ def render():
         # Render each phone as a tree: phone box on left, 4 social branches on right
         branches_html = ""
         for s in SOCIALS:
+            slots = cf_data.get((phone["id"], s["id"]), {})
+            fo = _fmt_val(slots.get("followers"))
+            vi = _fmt_val(slots.get("views"))
+            rc = _fmt_val(slots.get("reach"))
             branches_html += f"""
             <div class="branch-row">
                 <div class="branch-line"></div>
@@ -127,9 +149,9 @@ def render():
                         <strong>{s['name']}</strong>
                     </div>
                     <div class="leaf-stats">
-                        <span>👥 — followers</span>
-                        <span>👀 — views/7d</span>
-                        <span>📈 — reach/7d</span>
+                        <span>👥 {fo} followers</span>
+                        <span>👀 {vi} views</span>
+                        <span>📈 {rc} reach</span>
                     </div>
                 </div>
             </div>
