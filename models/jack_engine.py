@@ -602,6 +602,12 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
 
 # ─── Captions: upload a reel video / photos → Jack writes the IG caption ────
 
+def _video_mime(suffix: str) -> str:
+    """MIME по расширению файла — Gemini принимает video/mp4|mov|webm (см. gemini_video)."""
+    s = (suffix or "").lower().lstrip(".")
+    return {"mov": "video/mov", "webm": "video/webm"}.get(s, "video/mp4")
+
+
 def _video_frames(video_bytes: bytes, suffix: str = ".mp4", n: int = 8) -> list[bytes]:
     """Extract up to n evenly-spaced frames from a video → list of JPEG bytes.
 
@@ -658,55 +664,55 @@ def caption_from_media(images: list[bytes] | None = None,
                        product: str = "", extra: str = "") -> str:
     """Write an IG/TikTok caption for a finished reel/post from uploaded media.
 
-    Accepts photos and/or a video. Photos are sent to vision as-is; the video is
-    sampled into a few frames so Jack can 'see' the reel. Returns copy-ready markdown
-    (caption + hashtags + first comment). Falls back to a text-only write if there's
-    no usable visual (e.g. video frames couldn't be extracted) — using `extra` as the
-    description so Jack still produces a caption instead of failing.
+    Лучший путь — отдать Gemini САМО ВИДЕО (движение, звук, тайминг текста на экране):
+    раскадровка на 8 картинок теряла ровно то, из-за чего подписи звучали «мимо рилса».
+    Если видео не прошло (формат/размер/перегрузка) — падаем на кадры, а если и они не
+    вышли — пишем по описанию из `extra`, честно предупредив об этом.
     """
-    from models.llm import gemini_vision, smart_text
+    from models.llm import gemini_video, gemini_vision, smart_text
     images = list(images or [])
     mime_types = list(mime_types or ["image/jpeg"] * len(images))
-
-    frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
-    vis = images + frames
-    vis_mimes = mime_types + ["image/jpeg"] * len(frames)
 
     try:
         brand_ctx = _brand_context()
     except Exception:
         brand_ctx = ""
 
-    what = []
-    if frames:
-        what.append(f"{len(frames)} кадра(ов) из готового рилса (по порядку: начало → конец)")
-    if images:
-        what.append(f"{len(images)} фото")
-    media_line = " + ".join(what) if what else "описание словами (медиа не разобралось)"
-
-    seen_block = (
+    _SEEN_VIDEO = (
+        "Перед тобой САМ РИЛС — видео целиком (движение, звук, текст на экране). "
+        "СНАЧАЛА посмотри его: что за животное, что происходит по ходу сюжета, эмоция, "
+        "сеттинг, какой текст появляется на экране и в какой момент, где появляется "
+        "продукт. Подпись ОБЯЗАНА опираться на конкретный сюжет рилса, а не на общий товар."
+    )
+    _SEEN_FRAMES = (
         "Перед тобой РЕАЛЬНЫЕ кадры из рилса (по порядку начало→конец). "
         "СНАЧАЛА внимательно посмотри: что за животное, что происходит, эмоция, "
         "сеттинг, есть ли текст на экране, где появляется продукт. Подпись ОБЯЗАНА "
         "опираться на конкретный сюжет рилса, а не на общий товар."
-        if vis else
+    )
+    _SEEN_NONE = (
         "Видео/фото разобрать не удалось — пиши по описанию ниже. Если описания мало, "
         "честно скажи об этом одной строкой в начале."
     )
 
-    base_rules = textwrap.dedent(f"""\
+    def _rules(seen_block: str) -> str:
+        return textwrap.dedent(f"""\
         Ты Джек — креативный senior SMM-копирайтер бренда {brand} (pet supplements, рынок {market}),
         делаешь вирусные подписи на уровне топ-pet-брендов (Pet Honesty, Native Pet). Тебе дали
         ГОТОВЫЙ рилс — напиши ПОДПИСЬ (caption) под публикацию, НЕ сценарий.
 
         {seen_block}
 
-        Товар/тема: {product or '(определи по кадрам)'}
+        Товар/тема: {product or '(определи сам по медиа)'}
         Пожелания от Дарьи: {extra or '(нет)'}
 
-        Выдай на ЖИВОМ английском, без клише и «рекламности», строго в таком формате:
+        ЯЗЫК — ЖЁСТКО: сами подписи, хэштеги и first comment ТОЛЬКО на английском (рынок
+        {market}) — даже если пожелания Дарьи и этот промпт написаны по-русски. По-русски
+        можно ОДИН блок — «📹 Что в рилсе» (это для Дарьи, а не для публикации).
 
-        **📹 Что в рилсе:** 1-2 предложения — что ты реально видишь на кадрах (это доказывает,
+        Пиши на ЖИВОМ английском, без клише и «рекламности», строго в таком формате:
+
+        **📹 Что в рилсе:** 1-2 предложения — что ты реально видишь (это доказывает,
         что ты посмотрел рилс, и заземляет подписи).
 
         **✍️ 3 варианта подписи** — РАЗНЫЕ по длине и углу, каждый цепляет с первой строки:
@@ -730,14 +736,31 @@ def caption_from_media(images: list[bytes] | None = None,
         Чистый markdown, без вступлений вроде «вот ваша подпись». Сразу с «📹 Что в рилсе».
     """)
 
+    # 1. Главный путь: Джек смотрит САМ РИЛС (видео + фото, если есть).
+    if video_bytes:
+        out = gemini_video(_rules(_SEEN_VIDEO), video_bytes, _video_mime(video_suffix),
+                           images, mime_types)
+        if not out.startswith("⚠️"):
+            return out
+
+    # 2. Видео не прошло (формат/размер/перегрузка) → раскадровка, как раньше.
+    frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
+    vis = images + frames
+    vis_mimes = mime_types + ["image/jpeg"] * len(frames)
     if vis:
-        # Flash — the model the free tier actually serves (Pro is quota-locked on free).
-        return gemini_vision(base_rules, vis, vis_mimes, model="gemini-2.5-flash")
-    # No visual → be honest if a video was uploaded but couldn't be read.
-    out = smart_text(base_rules)
-    if video_bytes and not frames:
-        out = ("⚠️ Не смог раскадрировать это видео (формат/кодек) — подпись написана по "
-               "описанию, не по картинке. Для точности добавь скриншот кадра в «Фото».\n\n" + out)
+        out = gemini_vision(_rules(_SEEN_FRAMES if frames else _SEEN_VIDEO), vis, vis_mimes)
+        if not out.startswith("⚠️"):
+            if video_bytes and frames:
+                out = (f"ℹ️ Само видео Gemini не взял — подпись по {len(frames)} кадрам "
+                       f"(движение и звук не учтены).\n\n" + out)
+            return out
+
+    # 3. Ни видео, ни кадров → пишем по описанию и говорим об этом честно.
+    out = smart_text(_rules(_SEEN_NONE))
+    if video_bytes:
+        out = ("⚠️ Это видео не удалось ни отправить целиком, ни раскадрировать "
+               "(формат/кодек/размер) — подпись написана по описанию, не по картинке. "
+               "Для точности добавь скриншот кадра в «Фото».\n\n" + out)
     return out
 
 

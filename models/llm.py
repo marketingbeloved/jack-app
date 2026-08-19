@@ -59,13 +59,28 @@ def _gemini_key() -> str:
 
 
 # При перегрузке одной модели (503 «high demand») пробуем другие — у них РАЗНЫЕ пулы
-# мощностей, поэтому если 2.5-flash лёг, 2.0-flash обычно отвечает. Все бесплатные.
-_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+# мощностей, поэтому если одна легла, соседняя обычно отвечает. Все бесплатные.
+# ВАЖНО: gemini-2.0-flash и gemini-2.5-pro Google СНЯЛ с обслуживания (404 «no longer
+# available») — держать их в цепочке нельзя, она обрывалась на первом же 404.
+_FALLBACK_MODELS = ["gemini-3-flash-preview", "gemini-3.5-flash", "gemini-2.5-flash",
+                    "gemini-flash-latest"]
+
+# Модель «зрения» (видео/кадры/фото → подписи). Отдельно от текстовой, чтобы поднимать
+# качество подписей, не трогая генерацию скриптов рилсов. Выбрана по замеру на реальном
+# рилсе: подпись заземлена по видео за ~11 сек (3.5-flash даёт то же за ~67 сек — для
+# веб-сессии Streamlit это риск обрыва, поэтому она в фолбэке, а не первой).
+VISION_MODEL = "gemini-3-flash-preview"
 
 
 def _is_overload(err: str) -> bool:
     e = (err or "").lower()
     return any(s in e for s in ("перегруж", "503", "429", "unavailable", "overload", "high demand"))
+
+
+def _is_retired(err: str) -> bool:
+    """Модель снята с обслуживания (404) — надо идти к следующей, а не сдаваться."""
+    e = (err or "").lower()
+    return "404" in e and ("no longer available" in e or "not found" in e)
 
 
 def _gemini_call(body: dict, timeout: int, primary: str) -> str:
@@ -81,20 +96,116 @@ def _gemini_call(body: dict, timeout: int, primary: str) -> str:
         if text:
             return text
         last_err = err
-        if not _is_overload(err):
-            break  # не перегрузка (битый ключ/лимит) — другая модель не спасёт
+        if not (_is_overload(err) or _is_retired(err)):
+            break  # не перегрузка и не снятая модель (битый ключ/лимит) — другая не спасёт
     return last_err
 
 
 def gemini_vision(prompt: str, images: list[bytes], mime_types: list[str] | None = None,
-                  model: str = "gemini-2.5-flash", timeout: int = 90) -> str:
+                  model: str = "", timeout: int = 120) -> str:
     """Send a prompt + images to Gemini (с фолбэком по моделям). Returns text or '⚠️ …'."""
     mime_types = mime_types or ["image/jpeg"] * len(images)
     parts = [{"text": prompt}]
     for img, mt in zip(images, mime_types):
         parts.append({"inline_data": {"mime_type": mt or "image/jpeg",
                                        "data": base64.b64encode(img).decode()}})
-    return _gemini_call({"contents": [{"parts": parts}]}, timeout, model)
+    return _gemini_call({"contents": [{"parts": parts}]}, timeout, model or VISION_MODEL)
+
+
+# ─── Видео целиком (а не кадры) — чтобы Джек реально «смотрел» рилс ──────────
+# Inline-запрос к Gemini ограничен ~20 МБ вместе с base64 (+33%), поэтому рилсы
+# тяжелее лимита уходят через Files API (там до 2 ГБ).
+_VIDEO_INLINE_LIMIT = 12 * 1024 * 1024
+_FILES_BASE = "https://generativelanguage.googleapis.com"
+
+
+def _files_upload(video_bytes: bytes, mime: str, timeout: int = 300) -> tuple[str, str, str]:
+    """Залить видео в Gemini Files API → (file_name, file_uri, ""), либо ("", "", "⚠️ …").
+
+    Google дожимает видео на своей стороне: пока state != ACTIVE, generateContent
+    отвечает 400 — поэтому ждём готовности. Файл живёт у Google 48 ч, мы убираем его
+    сразу после ответа (см. gemini_video).
+    """
+    import requests
+    key = _gemini_key()
+    try:
+        start = requests.post(
+            f"{_FILES_BASE}/upload/v1beta/files?key={key}",
+            headers={"X-Goog-Upload-Protocol": "resumable",
+                     "X-Goog-Upload-Command": "start",
+                     "X-Goog-Upload-Header-Content-Length": str(len(video_bytes)),
+                     "X-Goog-Upload-Header-Content-Type": mime,
+                     "Content-Type": "application/json"},
+            json={"file": {"display_name": "reel"}}, timeout=60,
+        )
+        up_url = start.headers.get("X-Goog-Upload-URL", "")
+        if start.status_code != 200 or not up_url:
+            return "", "", f"⚠️ Gemini не принял загрузку видео ({start.status_code})."
+        fin = requests.post(
+            up_url,
+            headers={"Content-Length": str(len(video_bytes)), "X-Goog-Upload-Offset": "0",
+                     "X-Goog-Upload-Command": "upload, finalize"},
+            data=video_bytes, timeout=timeout,
+        )
+        if fin.status_code != 200:
+            return "", "", f"⚠️ Видео не догрузилось в Gemini ({fin.status_code})."
+        f = fin.json().get("file", {})
+        name, uri = f.get("name", ""), f.get("uri", "")
+        for _ in range(45):  # до ~90 сек на обработку
+            if f.get("state") == "ACTIVE":
+                return name, uri, ""
+            time.sleep(2)
+            try:
+                f = requests.get(f"{_FILES_BASE}/v1beta/{name}?key={key}", timeout=30).json()
+            except Exception:  # noqa: BLE001, PERF203
+                continue
+        return name, "", "⚠️ Gemini не успел обработать видео — попробуй ещё раз."
+    except Exception as e:  # noqa: BLE001
+        return "", "", f"⚠️ Загрузка видео в Gemini не прошла: {str(e)[:200]}"
+
+
+def _files_delete(name: str) -> None:
+    if not name:
+        return
+    try:
+        import requests
+        requests.delete(f"{_FILES_BASE}/v1beta/{name}?key={_gemini_key()}", timeout=30)
+    except Exception:
+        pass
+
+
+def gemini_video(prompt: str, video_bytes: bytes, mime_type: str = "video/mp4",
+                 images: list[bytes] | None = None, mime_types: list[str] | None = None,
+                 model: str = "", timeout: int = 240) -> str:
+    """Отправить в Gemini САМО ВИДЕО (движение, звук, текст на экране), а не раскадровку.
+
+    Мелкие рилсы уходят inline, тяжёлые — через Files API. Можно добавить фото
+    (доп. кадры/референсы). Возвращает текст или '⚠️ …' — вызывающий тогда падает
+    на кадры (см. jack_engine.caption_from_media).
+    """
+    if not _gemini_key():
+        return "⚠️ Gemini key не найден."
+    images = list(images or [])
+    mime_types = list(mime_types or ["image/jpeg"] * len(images))
+
+    parts: list = [{"text": prompt}]
+    fname = ""
+    if len(video_bytes) <= _VIDEO_INLINE_LIMIT:
+        parts.append({"inline_data": {"mime_type": mime_type,
+                                      "data": base64.b64encode(video_bytes).decode()}})
+    else:
+        fname, uri, err = _files_upload(video_bytes, mime_type, timeout)
+        if err:
+            _files_delete(fname)
+            return err
+        parts.append({"file_data": {"mime_type": mime_type, "file_uri": uri}})
+    for img, mt in zip(images, mime_types):
+        parts.append({"inline_data": {"mime_type": mt or "image/jpeg",
+                                      "data": base64.b64encode(img).decode()}})
+    try:
+        return _gemini_call({"contents": [{"parts": parts}]}, timeout, model or VISION_MODEL)
+    finally:
+        _files_delete(fname)
 
 
 def gemini_text(prompt: str, system: str = "", model: str = "gemini-2.5-flash",
