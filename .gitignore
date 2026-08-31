@@ -8,14 +8,10 @@ __pycache__/
 .streamlit/secrets.toml
 .bp-credentials/
 
-# Runtime data (lives in Supabase in cloud; local-only on the Mac)
-cache/plan_briefs.json
-cache/concepts.json
-cache/concepts.backup.json
-
-# Jack's few-shot corpus — brand intel, used only for LOCAL Claude generation.
-# Not needed in the read-only cloud, keep it off GitHub.
-cache/notion_briefs_*.json
+# Runtime data — ВСЯ папка. Источник правды это Supabase, локальные файлы лишь бэкап,
+# и репозиторий ПУБЛИЧНЫЙ: сюда попадают ТЗ, концепты, корпуса и правила Джека.
+# Раньше перечислялись отдельные файлы, и каждый новый (jack_rules.json) утекал бы в паблик.
+cache/
 
 # launchd / watchdog logs
 *.log

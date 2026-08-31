@@ -454,6 +454,9 @@ def render():
                 st.success("Удалено.")
                 st.rerun()
 
+    # ─── Джек пишет план на месяц целиком ────────────────────────────────────
+    _render_month_generator(brand, owners, market)
+
     # ─── Brief Jack form ─────────────────────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:24px;">🚀 Brief Jack to generate concepts</div>', unsafe_allow_html=True)
     with st.form("brief_jack"):
@@ -489,6 +492,160 @@ def render():
                     st.code(concepts[0]["raw"])
             else:
                 st.success(f"Jack generated {len(concepts)} concept(s). Review them in Jack Workspace → Pipeline → To approve.")
+
+
+# ─── Джек пишет весь месяц: анализ прошлого → стратегия → посты по неделям ───
+_FMT_RU = {"reel": "🎬 рилс", "carousel": "🖼 карусель", "animation": "✨ анимация",
+           "lifestyle": "📷 life pic", "blogger_photo": "🐶 фото блогера", "promo": "🏷 промо"}
+
+
+def _render_month_generator(brand: str, owners: dict, market: str) -> None:
+    from models import ig_insights, plan_analytics, plan_generator
+
+    st.markdown('<div class="section-label" style="margin-top:24px;">'
+                '🤖 План на месяц — Джек пишет сам</div>', unsafe_allow_html=True)
+    st.caption("Джек читает прошлые месяцы (темы, форматы, наши ТЗ, цифры Instagram), "
+               "потом пишет весь месяц: темы, хуки, скрипты, подписи. "
+               "Структура держится: 1 пост в неделю — фото от блогера у Вики, остальное — "
+               "карусели, анимации и рилсы разных форматов у Дины.")
+
+    analysis = plan_analytics.collect(brand)
+
+    with st.expander("📊 Что Джек увидел в прошлых месяцах", expanded=False):
+        st.markdown(plan_analytics.as_markdown(analysis))
+        st.markdown("---")
+        st.markdown("**Цифры Instagram по постам** — выгрузка из Meta Business Suite "
+                    "(Insights → Экспорт → CSV) или из Instagram Insights.")
+        up = st.file_uploader("Загрузить выгрузку (CSV)", type=["csv"], key="ig_csv_up")
+        if up is not None and st.button("Загрузить цифры", key="ig_csv_btn"):
+            rows, note = ig_insights.parse_csv(up.getvalue())
+            if not rows:
+                st.error(note)
+            else:
+                added = ig_insights.merge(rows, brand)
+                st.success(f"{note}. Новых постов добавлено: {added}. "
+                           f"Всего в базе: {len(ig_insights.load(brand))}.")
+                st.rerun()
+        have = ig_insights.load(brand)
+        if have:
+            st.caption(f"В базе {len(have)} постов с цифрами. Обновится у всей команды.")
+
+    gc1, gc2 = st.columns([1, 1])
+    month_label = gc1.selectbox("Месяц, который писать", list(MONTHS.keys()),
+                                index=len(MONTHS) - 1, key="gen_month_sel")
+    gy, gm = MONTHS[month_label]
+    weeks = plan_generator.month_skeleton(gy, gm)
+    gc2.metric("Слотов в месяце", sum(len(w) for w in weeks),
+               f"{len(weeks)} недель · {len(weeks)} фото блогера")
+
+    extra = st.text_area(
+        "Что учесть в этом месяце (пожелания, акции, новинки)",
+        key="gen_month_extra", height=90,
+        placeholder="напр. в сентябре запуск нового вкуса; сделать акцент на возврате в школу")
+
+    if st.button(f"🐾 Джек, напиши план на {month_label.lower()}", type="primary",
+                 use_container_width=True, key="gen_month_go"):
+        if not analysis.get("total"):
+            st.error("В базе нет прошлых месяцев — Джеку не на чем строить анализ.")
+        else:
+            progress = st.progress(0.0, text="Джек читает прошлые месяцы…")
+            strategy = plan_generator.month_strategy(analysis, gy, gm, brand, extra)
+            if strategy.get("error"):
+                progress.empty()
+                st.error(f"Не получилось собрать стратегию: {strategy['error']}")
+                if strategy.get("raw"):
+                    st.code(strategy["raw"])
+                return
+
+            posts: list[dict] = []
+            used: list[str] = []
+            failed: list[int] = []
+            for i, week in enumerate(weeks, start=1):
+                progress.progress(i / (len(weeks) + 1),
+                                  text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
+                got = plan_generator.generate_week(
+                    week, strategy, analysis, i, len(weeks),
+                    brand=brand, market=market, used_titles=used, extra=extra)
+                if not got:
+                    failed.append(i)
+                    continue
+                posts.extend(got)
+                used.extend(p["title"] for p in got)
+            progress.empty()
+
+            st.session_state["gen_month_posts"] = posts
+            st.session_state["gen_month_strategy"] = strategy
+            st.session_state["gen_month_brand"] = brand
+            st.session_state["gen_month_label"] = month_label
+            st.session_state["gen_month_failed"] = failed
+
+    _render_month_preview(brand, owners)
+
+
+def _render_month_preview(brand: str, owners: dict) -> None:
+    posts = st.session_state.get("gen_month_posts") or []
+    if not posts:
+        return
+    strategy = st.session_state.get("gen_month_strategy") or {}
+    label = st.session_state.get("gen_month_label", "")
+    failed = st.session_state.get("gen_month_failed") or []
+
+    st.markdown("---")
+    st.markdown(f"### Черновик плана · {label} · {len(posts)} постов")
+    if failed:
+        st.warning(f"Недели {', '.join(map(str, failed))} не сгенерировались — Джек не вернул "
+                   f"валидный ответ. Их в черновике нет; можно перезапустить генерацию.")
+    if st.session_state.get("gen_month_brand") != brand:
+        st.warning("Черновик сделан для другого бренда — перегенерируй, прежде чем заливать.")
+
+    if strategy.get("big_idea"):
+        st.info(f"**Идея месяца.** {strategy['big_idea']}")
+    sc1, sc2, sc3 = st.columns(3)
+    for col, key, title in ((sc1, "keep", "✅ Оставляем"), (sc2, "drop", "🚫 Убираем"),
+                            (sc3, "new_bets", "🎲 Новые заходы")):
+        items = strategy.get(key) or []
+        if items:
+            col.markdown(f"**{title}**\n" + "\n".join(f"- {x}" for x in items[:5]))
+    if strategy.get("data_gaps"):
+        st.caption("Чего не хватило Джеку для точности: " + "; ".join(strategy["data_gaps"]))
+
+    st.markdown("**Посты**")
+    for p in posts:
+        owner_name = owners.get(p["owner"], {}).get("name", p["owner"])
+        head = (f'{p["date"]} · {_FMT_RU.get(p["format"], p["format"])} · {owner_name} — '
+                f'{p["title"]}')
+        with st.expander(head, expanded=False):
+            if p.get("hook"):
+                st.markdown(f'**Хук:** {p["hook"]}')
+            if p.get("product"):
+                st.caption(f'Товар: {p["product"]} · пиллар: {p.get("pillar") or "—"} · '
+                           f'категория: {TYPE_COLORS.get(p["type"], {}).get("label") or p["type"]}')
+            if p.get("script"):
+                st.markdown(p["script"])
+            if p.get("caption"):
+                st.markdown(f'**Подпись (EN):**\n\n{p["caption"]}')
+            if p.get("why"):
+                st.caption(f'Почему в плане: {p["why"]}')
+
+    st.markdown("")
+    bc1, bc2 = st.columns([2, 1])
+    with_briefs = bc2.checkbox("Сразу сохранить ТЗ", value=True, key="gen_month_briefs",
+                               help="Скрипты лягут в комментарии к ячейкам — Вика и Дина увидят сразу.")
+    if bc1.button(f"📥 Залить {len(posts)} постов в план", type="primary",
+                  use_container_width=True, key="gen_month_commit"):
+        from models import plan_generator
+        res = plan_generator.commit_to_plan(posts, brand, write_briefs=with_briefs)
+        if res["errors"]:
+            st.error("Часть не записалась:\n" + "\n".join(f"- {e}" for e in res["errors"][:10]))
+        st.success(f"Добавлено постов: {res['added']} · ТЗ сохранено: {res['briefs']}. "
+                   f"Видно всей команде.")
+        for k in ("gen_month_posts", "gen_month_strategy", "gen_month_failed"):
+            st.session_state.pop(k, None)
+        st.rerun()
+    if st.button("Очистить черновик", key="gen_month_clear"):
+        for k in ("gen_month_posts", "gen_month_strategy", "gen_month_failed"):
+            st.session_state.pop(k, None)
+        st.rerun()
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────

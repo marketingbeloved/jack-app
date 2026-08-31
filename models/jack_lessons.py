@@ -132,6 +132,25 @@ def list_rules(brand: str) -> list[dict]:
     return sorted(items, key=lambda r: r.get("ts", 0), reverse=True)
 
 
+def render_rules_for_prompt(brand: str, max_count: int = 40) -> str:
+    """Постоянные инструкции Джеку — блоком в system prompt.
+
+    Вызывается из jack_engine (концепты, ТЗ), jack_chat и генератора плана. Раньше этой
+    функции не существовало: все четыре вызова падали в ImportError под try/except, и
+    правила, которые Дарья с Таней пишут в панели, молча не доезжали ни до одного ответа.
+    """
+    items = list_rules(brand)[:max_count]
+    if not items:
+        return ""
+    out = ("\n\n=== ПОСТОЯННЫЕ ИНСТРУКЦИИ ОТ КОМАНДЫ (правила, которые задала Дарья/Таня) ===\n"
+           "Это прямые указания заказчика. Соблюдай их во всех ответах — они важнее твоих "
+           "привычных шаблонов.\n")
+    for r in items:
+        author = f" — {r['author']}" if r.get("author") else ""
+        out += f"- {r.get('text', '').strip()}{author}\n"
+    return out
+
+
 def render_rules_for_prompt(brand: str) -> str:
     """Инструкции Джеку для system-промпта (применяются ко всем ответам)."""
     items = list_rules(brand)
