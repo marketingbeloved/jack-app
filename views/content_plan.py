@@ -514,9 +514,13 @@ def _render_month_generator(brand: str, owners: dict, market: str) -> None:
     with st.expander("📊 Что Джек увидел в прошлых месяцах", expanded=False):
         st.markdown(plan_analytics.as_markdown(analysis))
         st.markdown("---")
-        st.markdown("**Цифры Instagram по постам** — выгрузка из Meta Business Suite "
-                    "(Insights → Экспорт → CSV) или из Instagram Insights.")
-        up = st.file_uploader("Загрузить выгрузку (CSV)", type=["csv"], key="ig_csv_up")
+        st.markdown("**Цифры Instagram по постам.** Обычно их приносит сборщик: на маке "
+                    "`python3 scripts/ig_collect.py collect` — Джек сам заходит в Instagram, "
+                    "читает просмотры, лайки и комменты по нашим постам и кладёт сюда. "
+                    "Инста показывает цифры только залогиненным, поэтому один раз нужен "
+                    "`ig_collect.py login`. Ручная выгрузка ниже — запасной путь.")
+        up = st.file_uploader("Загрузить выгрузку CSV (Meta Business Suite → Insights → Экспорт)",
+                              type=["csv"], key="ig_csv_up")
         if up is not None and st.button("Загрузить цифры", key="ig_csv_btn"):
             rows, note = ig_insights.parse_csv(up.getvalue())
             if not rows:
