@@ -75,33 +75,50 @@ def _js(code: str) -> str:
     )
 
 
+PROFILE_URL = f"https://www.instagram.com/{HANDLE}/"
+
+
 def open_instagram() -> None:
-    """Focus an Instagram tab, opening one if there isn't any."""
+    """Point an Instagram tab at our profile — and make sure it actually lands there.
+
+    Grabbing "any tab containing instagram.com" was not enough: Darya keeps the Instagram
+    ads tool open too, and that page carries none of the profile data, which read as
+    "не выполнен вход". So we navigate the tab explicitly and wait for the URL to settle.
+    """
     _osascript(f'''
 tell application "Safari"
   if (count of windows) = 0 then
-    make new document with properties {{URL:"https://www.instagram.com/{HANDLE}/"}}
+    make new document with properties {{URL:"{PROFILE_URL}"}}
   else
-    set foundTab to missing value
+    set tgt to missing value
     repeat with w in windows
       repeat with t in tabs of w
         if (URL of t as string) contains "instagram.com" then
-          set foundTab to t
+          set tgt to t
           set current tab of w to t
           exit repeat
         end if
       end repeat
-      if foundTab is not missing value then exit repeat
+      if tgt is not missing value then exit repeat
     end repeat
-    if foundTab is missing value then
+    if tgt is missing value then
       tell front window
-        set current tab to (make new tab with properties {{URL:"https://www.instagram.com/{HANDLE}/"}})
+        set current tab to (make new tab with properties {{URL:"{PROFILE_URL}"}})
       end tell
+    else
+      set URL of tgt to "{PROFILE_URL}"
     end if
   end if
 end tell
 ''')
-    time.sleep(4)
+    for _ in range(12):
+        time.sleep(2)
+        try:
+            if HANDLE in _js("window.location.href"):
+                time.sleep(2)
+                return
+        except SafariError:
+            continue
 
 
 # JavaScript that runs inside the logged-in page. Kicked off once, then polled: AppleScript
@@ -134,24 +151,28 @@ window.__jack = {done:false, err:null, rows:[]};
         l: likes, c: comments, cap: String(cap).slice(0,200)
       });
     };
-    var prof = await fetch('/api/v1/users/web_profile_info/?username=%(handle)s',
-                           {headers:H, credentials:'include'}).then(function(r){return r.json();});
-    var user = prof && prof.data && prof.data.user;
-    if(!user){ throw new Error('Instagram не отдал профиль — похоже, в этой вкладке не выполнен вход'); }
-    var uid = user.id;
-    var tl = (user.edge_owner_to_timeline_media || {}).edges || [];
-    tl.forEach(function(e){ push(e.node); });
-    var maxId = null, guard = 0;
+    var html = document.documentElement.innerHTML;
+    var m = html.match(/"profile_id":"(\\d+)"/) ||
+            html.match(/"owner":\\{"id":"(\\d+)"/) ||
+            html.match(/"user_id":"(\\d+)"/);
+    var uid = m ? m[1] : '';
+    var maxId = null, guard = 0, lastStatus = 0;
     while (rows.length < %(want)d && guard < 12) {
       guard++;
       var url = '/api/v1/feed/user/' + uid + '/?count=33' + (maxId ? ('&max_id=' + maxId) : '');
-      var j = await fetch(url, {headers:H, credentials:'include'}).then(function(r){return r.json();});
+      var resp = await fetch(url, {headers:H, credentials:'include'});
+      lastStatus = resp.status;
+      var j = await resp.json();
       var items = (j && j.items) || [];
       if (!items.length) break;
       items.forEach(push);
       if (!j.more_available) break;
       maxId = j.next_max_id;
       await new Promise(function(r){ setTimeout(r, 1200); });
+    }
+    if (!rows.length) {
+      throw new Error('Instagram вернул пусто (HTTP ' + lastStatus + ', uid="' + uid +
+                      '") — возможно, в этой вкладке не выполнен вход');
     }
     var seen = {}; var uniq = [];
     rows.forEach(function(r){ if(!seen[r.code]){ seen[r.code]=1; uniq.push(r); } });
