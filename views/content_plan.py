@@ -316,6 +316,39 @@ def set_plan_owner(brand: str, date_key: str, pid: str, owner: str) -> None:
             return
 
 
+def update_plan_post(brand: str, date_key: str, pid: str, *, title: str | None = None,
+                     ptype: str | None = None, pillar: str | None = None,
+                     new_date: str | None = None) -> str:
+    """Правка поста на месте: тема, цвет-категория, пиллар, перенос на другой день.
+
+    Раньше этого не было вовсе — тему можно было только удалить и завести заново, теряя
+    вместе с постом и написанное ТЗ. Возвращает дату, где пост оказался.
+    """
+    plan = load_plan(brand)
+    posts = plan.get(date_key) or []
+    target = next((p for p in posts if p.get("id") == pid), None)
+    if target is None:
+        return date_key
+
+    if title is not None:
+        target["title"] = title.strip() or target.get("title", "")
+    if ptype is not None:
+        target["type"] = ptype
+    if pillar is not None:
+        target["pillar"] = pillar.strip()
+
+    landed = date_key
+    if new_date and new_date != date_key:
+        plan[date_key] = [p for p in posts if p.get("id") != pid]
+        if not plan[date_key]:
+            plan.pop(date_key, None)
+        plan.setdefault(new_date, []).append(target)
+        landed = new_date
+
+    _save_plan(brand, plan)
+    return landed
+
+
 def delete_plan_post(brand: str, date_key: str, pid: str) -> None:
     plan = load_plan(brand)
     if date_key in plan:
@@ -558,6 +591,35 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     who_gen = _meta.get("gen") or _meta["name"]      # родительный: «Вики» / «Дины»
     who_name = _meta["name"]                          # именительный
     who_role = (_meta.get("role") or "").lower()
+
+    # Сам пост: тема, цвет, пиллар, дата. ТЗ при этом сохраняется — оно привязано к id.
+    with st.expander("✏️ Изменить пост (тема, цвет, дата)"):
+        e_title = st.text_input("Тема поста", value=item.get("title", ""), key=f"et_{pid}")
+        ec1, ec2 = st.columns(2)
+        _types = ["engaging", "selling", "viral", "neutral"]
+        _cur_type = item.get("type", "neutral")
+        e_type = ec1.selectbox(
+            "Категория (цвет)", _types,
+            index=_types.index(_cur_type) if _cur_type in _types else 3,
+            format_func=lambda t: TYPE_COLORS[t]["label"] or "без категории",
+            key=f"ety_{pid}")
+        e_pillar = ec2.text_input("Пиллар", value=item.get("pillar", ""), key=f"ep_{pid}")
+        try:
+            _d, _m = day_key.split(".")
+            _cur_date = date(date.today().year, int(_m), int(_d))
+        except (ValueError, IndexError):
+            _cur_date = date.today()
+        e_date = st.date_input("Дата", value=_cur_date, key=f"ed_{pid}")
+        if st.button("💾 Сохранить пост", key=f"ep_save_{pid}", use_container_width=True):
+            landed = update_plan_post(brand, day_key, pid, title=e_title, ptype=e_type,
+                                      pillar=e_pillar, new_date=e_date.strftime("%d.%m"))
+            # Заголовок ТЗ держим в согласии с темой, иначе в списке ТЗ останется старое имя.
+            if entry.get("text"):
+                plan_briefs.save(pid, entry["text"], title=e_title.strip(), pillar=e_pillar.strip(),
+                                 for_who=sel, updated=_now(), link=entry.get("link", ""),
+                                 wish=entry.get("wish", ""))
+            st.success(f"Сохранено — пост на {landed}. Видно всей команде.")
+            st.rerun()
 
     # Ссылка-исходник (фото блогера для ленты / референс). Джек вставит её в ТЗ.
     link = st.text_input(
