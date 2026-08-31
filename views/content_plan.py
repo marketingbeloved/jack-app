@@ -504,12 +504,16 @@ def _render_month_generator(brand: str, owners: dict, market: str) -> None:
 
     st.markdown('<div class="section-label" style="margin-top:24px;">'
                 '🤖 План на месяц — Джек пишет сам</div>', unsafe_allow_html=True)
+    analysis = plan_analytics.collect(brand)
+    photo_owner, video_owner = plan_generator.owners_from_history(analysis)
+    photo_name = owners.get(photo_owner, {}).get("name", photo_owner.title())
+    video_name = owners.get(video_owner, {}).get("name", video_owner.title())
+
     st.caption("Джек читает прошлые месяцы (темы, форматы, наши ТЗ, цифры Instagram), "
                "потом пишет весь месяц: темы, хуки, скрипты, подписи. "
-               "Структура держится: 1 пост в неделю — фото от блогера у Вики, остальное — "
-               "карусели, анимации и рилсы разных форматов у Дины.")
-
-    analysis = plan_analytics.collect(brand)
+               f"Структура держится: 1 пост в неделю — фото от блогера у {photo_name}, "
+               f"остальное — карусели, анимации и рилсы разных форматов у {video_name}. "
+               "Исполнители подставляются по прошлым месяцам этого бренда.")
 
     with st.expander("📊 Что Джек увидел в прошлых месяцах", expanded=False):
         st.markdown(plan_analytics.as_markdown(analysis))
@@ -538,7 +542,8 @@ def _render_month_generator(brand: str, owners: dict, market: str) -> None:
     month_label = gc1.selectbox("Месяц, который писать", list(MONTHS.keys()),
                                 index=len(MONTHS) - 1, key="gen_month_sel")
     gy, gm = MONTHS[month_label]
-    weeks = plan_generator.month_skeleton(gy, gm)
+    weeks = plan_generator.month_skeleton(gy, gm, photo_owner=photo_owner,
+                                          video_owner=video_owner)
     gc2.metric("Слотов в месяце", sum(len(w) for w in weeks),
                f"{len(weeks)} недель · {len(weeks)} фото блогера")
 
@@ -569,7 +574,8 @@ def _render_month_generator(brand: str, owners: dict, market: str) -> None:
                                   text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
                 got = plan_generator.generate_week(
                     week, strategy, analysis, i, len(weeks),
-                    brand=brand, market=market, used_titles=used, extra=extra)
+                    brand=brand, market=market, used_titles=used, extra=extra,
+                    owner_names={s: m.get("name", s) for s, m in owners.items()})
                 if not got:
                     failed.append(i)
                     continue

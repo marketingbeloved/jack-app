@@ -31,6 +31,25 @@ _ALLOWED_TYPES = {"engaging", "selling", "viral", "neutral"}
 _ALLOWED_FORMATS = {"blogger_photo", "carousel", "animation", "reel", "lifestyle", "promo"}
 
 
+def owners_from_history(analysis: dict) -> tuple[str, str]:
+    """Who does the blogger photo, and who does everything else — read off past months.
+
+    Hardcoding Vika and Dina would break the moment Tanya generates a month for TOBYDIC,
+    where the weekly photo is hers. Falls back to the BelovedPets pair when a brand has
+    no history to learn from.
+    """
+    photo_counts = {k: v for k, v in (analysis.get("blogger_photo", {}).get("owners") or {}).items()
+                    if k and k != "—"}
+    rest_counts = {k: v for k, v in (analysis.get("by_owner") or {}).items()
+                   if k and k != "—" and k not in photo_counts}
+    if not rest_counts:  # everyone shares the same slot type — fall back to all owners
+        rest_counts = {k: v for k, v in (analysis.get("by_owner") or {}).items()
+                       if k and k != "—"}
+    photo = max(photo_counts, key=photo_counts.get) if photo_counts else "vika"
+    video = max(rest_counts, key=rest_counts.get) if rest_counts else "dina"
+    return photo, video
+
+
 def month_skeleton(year: int, month: int, *,
                    weekdays_only: bool = True,
                    photo_owner: str = "vika",
@@ -120,25 +139,30 @@ def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedP
 def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
                   week_no: int, total_weeks: int, *, brand: str = "BelovedPets",
                   market: str = "US", used_titles: list[str] | None = None,
-                  extra: str = "") -> list[dict]:
+                  extra: str = "", owner_names: dict[str, str] | None = None) -> list[dict]:
     """Fill one week's slots with real posts — hook, script, caption. Returns [] on failure."""
     from models.plan_analytics import as_prompt_block
 
     used = used_titles or []
+    names = owner_names or {}
     theme = ""
     themes = strategy.get("weekly_themes") or []
     if week_no - 1 < len(themes):
         theme = themes[week_no - 1]
 
+    def who(slug: str) -> str:
+        return names.get(slug) or (slug.title() if slug else "исполнитель")
+
     slot_lines = []
     for s in week_slots:
         if s["format"] == "blogger_photo":
             slot_lines.append(
-                f'- {s["date"]} ({s["weekday"]}) — ЗАФИКСИРОВАНО: «фото от блогера», исполнитель Вика (графика). '
+                f'- {s["date"]} ({s["weekday"]}) — ЗАФИКСИРОВАНО: «фото от блогера», '
+                f'исполнитель {who(s["owner"])}. '
                 f'Формат менять нельзя, но тему/подачу/подпись придумай.')
         else:
             slot_lines.append(
-                f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель Дина (видео/анимация). '
+                f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
                 f'Выбери формат: carousel / animation / reel / lifestyle.')
 
     system = _system_prompt() + _rules_block(brand)
@@ -182,7 +206,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 {{"posts": [
   {{"date": "01.09", "title": "короткая тема строчными, как в плане",
     "type": "engaging|selling|viral", "format": "reel|carousel|animation|lifestyle|blogger_photo",
-    "owner": "vika|dina", "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
+    "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
     "product": "какой SKU в кадре", "hook": "English hook",
     "script": "готовое ТЗ в markdown", "caption": "English caption",
     "why": "обоснование из данных"}}
