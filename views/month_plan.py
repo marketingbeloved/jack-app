@@ -101,7 +101,8 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
                           text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
         got = plan_generator.generate_week(
             week, strategy, analysis, i, len(weeks), brand=brand, market=market,
-            used_titles=used, extra=extra, owner_names=name_map)
+            used_titles=used, extra=extra, owner_names=name_map,
+            team_roles={s: m.get("role", "") for s, m in owners.items()})
         if not got:
             failed.append(i)
             continue

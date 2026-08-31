@@ -50,6 +50,30 @@ def owners_from_history(analysis: dict) -> tuple[str, str]:
     return photo, video
 
 
+# Кто делает какой формат — по РОЛИ, а не по тому, кто исторически хватал задачу.
+# Карусель — это графика, значит графдизайнер, даже если в прошлые месяцы её собирал
+# видеомейкер. Роль ищется в живой команде; нет подходящей — падаем на исполнителя,
+# выведенного из истории.
+_FORMAT_ROLE = {
+    "carousel":  "graphics",
+    "reel":      "video",
+    "animation": "video",
+    "lifestyle": "video",
+    "promo":     "graphics",
+}
+
+
+def owner_for_format(fmt: str, team_roles: dict[str, str], fallback: str) -> str:
+    """slug исполнителя под формат: по роли из живой команды, иначе fallback."""
+    need = _FORMAT_ROLE.get(fmt)
+    if not need:
+        return fallback
+    for slug, role in team_roles.items():
+        if need in (role or "").lower():
+            return slug
+    return fallback
+
+
 def month_skeleton(year: int, month: int, *,
                    weekdays_only: bool = True,
                    photo_owner: str = "vika",
@@ -96,6 +120,24 @@ def _rules_block(brand: str) -> str:
         return ""
 
 
+def _catalog_block(limit: int = 60) -> str:
+    """Точный список SKU с категорией — чтобы Джек не выдумывал товары и не путал
+    тритсы с добавками (от категории зависит, можно ли ставить бейдж 'Lab tested')."""
+    try:
+        from models.products import all_products, short_title
+    except Exception:
+        return ""
+    lines = []
+    for p in all_products()[:limit]:
+        cat = (p.get("category") or "?").upper()
+        lines.append(f"  [{cat}] {short_title(p, 80)}")
+    if not lines:
+        return ""
+    return ("\nКАТАЛОГ — бери `product` ТОЧНО отсюда, полным названием. "
+            "TREATS = лакомства (им можно бейдж Lab tested), SUPPLEMENT и SPRAY = "
+            "добавки и спреи (им бейдж Lab tested НЕЛЬЗЯ):\n" + "\n".join(lines) + "\n")
+
+
 def _month_ru(month: int) -> str:
     return ["", "январь", "февраль", "март", "апрель", "май", "июнь", "июль",
             "август", "сентябрь", "октябрь", "ноябрь", "декабрь"][month]
@@ -139,7 +181,8 @@ def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedP
 def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
                   week_no: int, total_weeks: int, *, brand: str = "BelovedPets",
                   market: str = "US", used_titles: list[str] | None = None,
-                  extra: str = "", owner_names: dict[str, str] | None = None) -> list[dict]:
+                  extra: str = "", owner_names: dict[str, str] | None = None,
+                  team_roles: dict[str, str] | None = None) -> list[dict]:
     """Fill one week's slots with real posts — hook, script, caption. Returns [] on failure."""
     from models.plan_analytics import as_prompt_block
 
@@ -178,6 +221,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
 {extra or '(нет)'}
 
+{_catalog_block()}
 Уже занятые темы в этом месяце — НЕ повторяй:
 {'; '.join(used[-40:]) or '(пока пусто)'}
 
@@ -203,9 +247,22 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
   Для фото от блогера: что за кадр, какой overlay-текст, что выделить.
 - `caption` — подпись под пост на английском, 2-4 строки + CTA.
 - `why` — одной фразой, на чём основано решение (какой факт из истории/цифр).
-- COMPLIANCE строго: НЕЛЬЗЯ cure / treat / heal / FDA / 100% safe / guaranteed /
-  "Made in USA" / "vet-developed". МОЖНО: supports, may help with, gentle daily care,
-  natural, holistic. Supplement, NOT medicine.
+- ANIMATION — это НЕ мультик и не motion-графика с нуля. Это: берём готовое ФОТО,
+  Дина его оживляет (лёгкое движение в кадре), сверху накладывает текст и звук.
+  Фото берётся из одобренного UGC-контента JoinBrands (папка на общем Диске) — так и пиши:
+  «Исходник: одобренное фото из JoinBrands (ссылку даст Дарья)». Что именно на фото —
+  НЕ придумывай, как и в слоте «фото от блогера».
+- `product` бери ТОЧНО из каталога брендa, полным названием SKU. Не сокращай, не выдумывай
+  и не смешивай два товара в один. Если для идеи не нашёл подходящего SKU — поменяй идею.
+- COMPLIANCE строго. НЕЛЬЗЯ: cure / treat / heal / FDA / 100% safe / guaranteed /
+  "Made in USA" / "vet-developed" / "vet-recommended" / kills / prevents / eliminates.
+  МОЖНО: supports, may help with, gentle daily care, natural, holistic.
+  Supplement, NOT medicine.
+- ОТДЕЛЬНО про "Lab tested" (и HACCP / COA / GMP). Это можно ставить на экран ТОЛЬКО для
+  ТРИТСОВ (jerky, chews-лакомства, freeze-dried). Для добавок, капель, спреев и flea & tick
+  — НЕЛЬЗЯ, даже мелким бейджем. Из-за таких плашек режут рекламу.
+- Список запретов в сам текст ТЗ НЕ переписывай — исполнителю он не нужен, а в ТЗ создаёт
+  видимость нарушений. Просто соблюдай.
 - Не выдумывай скидки, цены и промо, которых нет в контексте выше.
 
 Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
@@ -223,10 +280,11 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     if parsed.get("error"):
         return []
     posts = parsed.get("posts") or []
-    return _normalise(posts, week_slots)
+    return _normalise(posts, week_slots, team_roles)
 
 
-def _normalise(posts: list[dict], slots: list[dict]) -> list[dict]:
+def _normalise(posts: list[dict], slots: list[dict],
+               team_roles: dict[str, str] | None = None) -> list[dict]:
     """Force the model's output back onto the real calendar.
 
     The model drifts on dates and occasionally drops or duplicates a slot, so slots are
@@ -256,6 +314,12 @@ def _normalise(posts: list[dict], slots: list[dict]) -> list[dict]:
         if ptype not in _ALLOWED_TYPES:
             ptype = "engaging"
 
+        # Исполнитель ставится ПОСЛЕ выбора формата: до генерации мы не знаем, что тут
+        # будет — карусель (графика) или рилс (видео).
+        owner = slot["owner"] or "dina"
+        if fmt != "blogger_photo" and team_roles:
+            owner = owner_for_format(fmt, team_roles, owner)
+
         out.append({
             "date": slot["date"],
             "iso": slot["iso"],
@@ -263,7 +327,7 @@ def _normalise(posts: list[dict], slots: list[dict]) -> list[dict]:
             "title": (post.get("title") or "").strip()[:120] or "(без темы)",
             "type": ptype,
             "format": fmt,
-            "owner": slot["owner"] or (post.get("owner") or "dina"),
+            "owner": owner,
             "pillar": (post.get("pillar") or "").strip()[:60],
             "product": (post.get("product") or "").strip()[:120],
             "hook": (post.get("hook") or "").strip(),

@@ -686,6 +686,24 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     if entry.get("updated"):
         st.caption(f"обновлено {entry['updated']}")
 
+    # ─── Отправить ТЗ Дине в Notion — ТОЛЬКО вручную, после проверки Дарьей ──────
+    if saved_txt:
+        st.markdown("---")
+        sent = st.session_state.get(f"notion_ok_{pid}")
+        if sent:
+            st.success(f"📤 Отправлено Дине в Notion: {sent}")
+        if st.button("📤 Написать ТЗ Дине в Notion", key=f"notion_{pid}",
+                     use_container_width=True,
+                     help="Уходит только сейчас, по этой кнопке. Автоматически — никогда."):
+            from models.plan_to_notion import push_post
+            with st.spinner("Оформляю ТЗ в Notion…"):
+                res = push_post(item, entry, brand=brand, market=market, date_key=day_key)
+            if res.get("error"):
+                st.error(res["error"])
+            else:
+                st.session_state[f"notion_ok_{pid}"] = res.get("url", "")
+                st.rerun()
+
     b1, b2 = st.columns(2)
     if b1.button("💾 Сохранить", key=f"save_{pid}", use_container_width=True):
         plan_briefs.save(pid, new, title=item["title"], pillar=item["pillar"],
