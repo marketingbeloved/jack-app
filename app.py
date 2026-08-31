@@ -51,7 +51,7 @@ def _run() -> None:
 
     pages: dict = {}
     _register(pages, "📅 Content Plan", "content_plan")
-    _register(pages, "🤖 План на месяц", "month_plan")
+    _register(pages, "✨ Monthly Content Creation", "month_plan")
     _register(pages, "🐾 Jack Workspace", "jack_workspace")
     _register(pages, "📊 Dashboard", "dashboard")
     _register(pages, "🏭 Content Factory", "content_factory")

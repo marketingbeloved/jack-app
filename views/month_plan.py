@@ -1,4 +1,4 @@
-"""«План на месяц» — Джек читает прошлые месяцы и пишет следующий целиком.
+"""Monthly Content Creation — Джек читает прошлые месяцы и пишет следующий целиком.
 
 Отдельный раздел, а не блок внизу контент-плана: это самостоятельная работа на несколько
 минут со своим черновиком и своей кнопкой публикации, и искать её под календарём никто
@@ -21,7 +21,7 @@ def render() -> None:
     brand = st.session_state.get("brand", "BelovedPets")
     owners = _team_owners()
 
-    st.markdown(f"# 🤖 План на месяц · {brand}")
+    st.markdown(f"# ✨ Monthly Content Creation · {brand}")
 
     analysis = plan_analytics.collect(brand)
     photo_owner, video_owner = plan_generator.owners_from_history(analysis)
