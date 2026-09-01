@@ -11,6 +11,7 @@ import subprocess
 import re
 import uuid
 import textwrap
+from datetime import date as _date
 from pathlib import Path
 
 import streamlit as st
@@ -865,6 +866,13 @@ def _scenes_to_table(concept: dict) -> list[dict]:
     Returns list of {time, video, tos, voiceover}. Falls back to dumping each
     raw scene line into the 'video' column if the LLM conversion fails.
     """
+    # Пост плана приносит уже разобранную таблицу — модель тут только портила: вместо
+    # содержания сцены возвращала ярлыки, и Дина получала пустые колонки.
+    ready = concept.get("scene_rows")
+    if ready and isinstance(ready, list):
+        return [{"time": str(r.get("time", "")), "video": str(r.get("video", "")),
+                 "tos": str(r.get("tos", "")), "voiceover": str(r.get("voiceover", ""))}
+                for r in ready if isinstance(r, dict)]
     scenes = concept.get("scenes") or []
     if not scenes:
         return []
@@ -963,6 +971,12 @@ def autopush_to_notion(concept: dict, end_date: str | None = None) -> dict:
     links = concept.get("links") or {}
     drive = str(links.get("product_pics_drive", "")).strip()
     listing = str(links.get("listing_url", "")).strip()
+    # Дата обязательна: без неё Notion создаёт страницу без срока, и Дина не понимает,
+    # к какому числу снимать. Вызовы отсюда её раньше не передавали вовсе — берём с
+    # концепта, а если и там нет, ставим сегодня, но НЕ оставляем пустой.
+    if not end_date:
+        end_date = (str(concept.get("air_date") or concept.get("date") or "").strip()
+                    or _date.today().isoformat())
     res = publish_to_notion(concept, drive, listing, end_date)
     if res and res.get("url"):
         set_concept_fields(concept["id"], notion_url=res["url"])

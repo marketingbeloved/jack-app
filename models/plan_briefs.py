@@ -85,11 +85,20 @@ def ensure_synced() -> int:
 
 
 def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
-         for_who: str = "vika", updated: str = "", link: str = "", wish: str = "") -> None:
+         for_who: str = "vika", updated: str = "", link: str = "", wish: str = "",
+         notion_url: str | None = None) -> None:
     text = (text or "").strip()
     link = (link or "").strip()
     entry = {"text": text, "link": link, "title": title,
              "pillar": pillar, "for": for_who, "updated": updated, "wish": (wish or "").strip()}
+    # Ссылка на страницу в Notion живёт вместе с ТЗ — по ней ловим повторную отправку.
+    # None означает «не трогать существующую», пустая строка — «забыть».
+    if notion_url is None:
+        prev = load_all().get(post_id, {}).get("notion_url", "")
+        if prev:
+            entry["notion_url"] = prev
+    elif notion_url:
+        entry["notion_url"] = notion_url
     keep = entry if (text or link) else None
     sb = _supabase()
     if sb:

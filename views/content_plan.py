@@ -689,17 +689,27 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     # ─── Отправить ТЗ Дине в Notion — ТОЛЬКО вручную, после проверки Дарьей ──────
     if saved_txt:
         st.markdown("---")
-        sent = st.session_state.get(f"notion_ok_{pid}")
+        # Ссылка на Notion хранится вместе с ТЗ, а не в session_state: иначе после
+        # перезагрузки страницы кнопка снова выглядит «не нажатой» и Дина получает дубль.
+        sent = entry.get("notion_url") or st.session_state.get(f"notion_ok_{pid}")
         if sent:
-            st.success(f"📤 Отправлено Дине в Notion: {sent}")
-        if st.button("📤 Написать ТЗ Дине в Notion", key=f"notion_{pid}",
-                     use_container_width=True,
+            st.success(f"📤 Уже в Notion у Дины: {sent}")
+            resend = st.checkbox("отправить заново (создаст вторую страницу)",
+                                 key=f"notion_force_{pid}")
+        else:
+            resend = False
+        label = "📤 Отправить заново" if sent else "📤 Написать ТЗ Дине в Notion"
+        if st.button(label, key=f"notion_{pid}", use_container_width=True,
+                     disabled=bool(sent) and not resend,
                      help="Уходит только сейчас, по этой кнопке. Автоматически — никогда."):
             from models.plan_to_notion import push_post
             with st.spinner("Оформляю ТЗ в Notion…"):
-                res = push_post(item, entry, brand=brand, market=market, date_key=day_key)
+                res = push_post(item, entry, brand=brand, market=market, date_key=day_key,
+                                force=resend)
             if res.get("error"):
                 st.error(res["error"])
+            elif res.get("skipped"):
+                st.info(res["skipped"])
             else:
                 st.session_state[f"notion_ok_{pid}"] = res.get("url", "")
                 st.rerun()

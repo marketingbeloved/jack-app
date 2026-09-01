@@ -43,6 +43,44 @@ def _scenes(text: str) -> list[str]:
     return scenes
 
 
+# «0-3 сек — что в кадре · на экране "English"» — ровно так Джек пишет сцены сейчас.
+_TIME_RE = re.compile(r"^\s*(\d+\s*[-–—]\s*\d+\s*(?:сек|s|sec)\b\.?)\s*[—–\-:]?\s*(.*)$", re.I)
+_TOS_RE = re.compile(r"(?:·\s*)?(?:на экране|overlay|on-?screen|текст на экране)\s*:?\s*(.+)$", re.I)
+_VO_RE = re.compile(r"(?:·\s*)?(?:voiceover|озвучка|голос за кадром)\s*:?\s*(.+)$", re.I)
+
+
+def scene_rows(text: str) -> list[dict]:
+    """Разобрать сцены в 4 колонки Дининой таблицы БЕЗ помощи модели.
+
+    Раньше строка сцены целиком уходила в LLM на пересборку, и та возвращала ярлыки
+    («Крючок», «Трансформация») вместо содержания — в Notion приезжала пустая таблица.
+    Разметка в ТЗ уже есть, её достаточно разобрать регуляркой.
+    """
+    rows: list[dict] = []
+    for line in text.split("\n"):
+        line = line.strip().lstrip("-*• ").strip()
+        m = _TIME_RE.match(re.sub(r"\*\*", "", line))
+        if not m:
+            continue
+        time_s, rest = m.group(1).strip(), m.group(2).strip()
+
+        vo = ""
+        mv = _VO_RE.search(rest)
+        if mv:
+            vo = mv.group(1).strip(' *"«»·')
+            rest = rest[:mv.start()].strip(" ·")
+
+        tos = ""
+        mt = _TOS_RE.search(rest)
+        if mt:
+            tos = mt.group(1).strip(' *"«»·')
+            rest = rest[:mt.start()].strip(" ·")
+
+        rows.append({"time": time_s, "video": rest.strip(" ·—-"),
+                     "tos": tos, "voiceover": vo})
+    return rows
+
+
 def _is_static(post: dict, text: str) -> bool:
     fmt = (post.get("format") or "").lower()
     title = (post.get("title") or "").lower()
@@ -68,15 +106,27 @@ def build_concept(post: dict, brief_text: str, brand: str = "BelovedPets",
         "cta": _caption(text),
         "format": "carousel" if _is_static(post, text) else "reel",
         "scenes": _scenes(text),
+        # Готовая таблица — publish_to_notion возьмёт её вместо пересборки моделью.
+        "scene_rows": scene_rows(text),
     }
 
 
 def push_post(post: dict, brief: dict, *, brand: str = "BelovedPets", market: str = "US",
-              date_key: str = "") -> dict:
-    """Отправить один пост в Notion. Возвращает {"url":…} или {"error":…}."""
+              date_key: str = "", force: bool = False) -> dict:
+    """Отправить один пост в Notion.
+
+    Возвращает {"url":…}, {"skipped":…, "url":…} если уже отправляли, или {"error":…}.
+    Защита от повтора обязательна: у «концептов» она была, у постов плана её не было, и
+    Дина получала по два одинаковых ТЗ на один пост — каждое нажатие кнопки создавало
+    новую страницу.
+    """
     text = (brief or {}).get("text", "") or ""
     if not text.strip():
         return {"error": "У поста нет ТЗ — сначала напиши его, потом отправляй Дине."}
+
+    already = (brief or {}).get("notion_url", "")
+    if already and not force:
+        return {"skipped": "Это ТЗ уже в Notion — второй раз не отправляю.", "url": already}
 
     concept = build_concept(post, text, brand=brand, market=market)
     if not concept["scenes"]:
@@ -84,9 +134,21 @@ def push_post(post: dict, brief: dict, *, brand: str = "BelovedPets", market: st
                          "Notion-таблицу собрать не из чего. Проверь текст ТЗ."}
 
     end_date = _end_date(date_key)
+    if not end_date:
+        return {"error": f"Не смог понять дату поста «{date_key}» — без неё в Notion "
+                         f"страница уедет без срока. Проверь дату в плане."}
+
     from models.jack_engine import publish_to_notion
-    return publish_to_notion(concept, drive_url=(brief or {}).get("link", ""),
-                             listing_url="", end_date=end_date)
+    res = publish_to_notion(concept, drive_url=(brief or {}).get("link", ""),
+                            listing_url="", end_date=end_date)
+    if res.get("url"):
+        from models import plan_briefs
+        b = brief or {}
+        plan_briefs.save(post["id"], text, title=b.get("title", ""), pillar=b.get("pillar", ""),
+                         for_who=b.get("for", "dina"), updated=b.get("updated", ""),
+                         link=b.get("link", ""), wish=b.get("wish", ""),
+                         notion_url=res["url"])
+    return res
 
 
 def _end_date(date_key: str) -> str | None:
