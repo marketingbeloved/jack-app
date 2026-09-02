@@ -120,9 +120,19 @@ def _rules_block(brand: str) -> str:
         return ""
 
 
-def _catalog_block(limit: int = 60) -> str:
+def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
     """Точный список SKU с категорией — чтобы Джек не выдумывал товары и не путал
     тритсы с добавками (от категории зависит, можно ли ставить бейдж 'Lab tested')."""
+    # Каталог в products.json — ТОЛЬКО BelovedPets (58 SKU, ни одного Tobydic). Подсовывать
+    # его Тане нельзя: Джек начинал вписывать чужие товары в планы Tobydic — «Beloved Pets
+    # Sweet Potato Dog Treats» в посте Tobydic и SKU BelovedPets без бренда в названии.
+    if brand.strip().lower() != "belovedpets":
+        return ("\nКАТАЛОГА ТОВАРОВ ПО ЭТОМУ БРЕНДУ У ТЕБЯ НЕТ. Бери товары ТОЛЬКО из прошлых "
+                "постов и ТЗ этого бренда, приведённых выше. СТРОГО ЗАПРЕЩЕНО называть товары "
+                "другого бренда (Beloved Pets и любые его SKU) — это разные бренды с разными "
+                "линейками. Не знаешь точное название — напиши общее («наши капли»), но чужое "
+                "имя не подставляй.\n")
+
     try:
         from models.products import all_products, short_title
     except Exception:
@@ -224,7 +234,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
 {extra or '(нет)'}
 
-{_catalog_block()}
+{_catalog_block(brand)}
 Уже занятые темы в этом месяце — НЕ повторяй:
 {'; '.join(used[-40:]) or '(пока пусто)'}
 
