@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 STORE = Path(__file__).resolve().parent.parent / "cache" / "plan_briefs.json"
@@ -98,7 +99,16 @@ def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
         if prev:
             entry["notion_url"] = prev
     elif notion_url:
-        entry["notion_url"] = notion_url
+        # Принимаем только настоящую ссылку на Notion. Проверка появилась после того,
+        # как сухой прогон с подменённым запросом записал в базу «notion.so/FAKE» по
+        # всем сентябрьским постам: кнопка решила, что ТЗ уже у Дины, и отправлять
+        # отказывалась, хотя страниц не существовало.
+        if re.match(r"https://(www\.)?(notion\.so|notion\.com|app\.notion\.com)/", notion_url):
+            entry["notion_url"] = notion_url
+        else:
+            prev = load_all().get(post_id, {}).get("notion_url", "")
+            if prev:
+                entry["notion_url"] = prev
     keep = entry if (text or link) else None
     sb = _supabase()
     if sb:
