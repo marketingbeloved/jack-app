@@ -215,8 +215,11 @@ def _system_prompt() -> str:
         8. Know the catalogue cold — when Darya says "Hemp Oil" you don't ask "which one",
            you check the catalogue, find the SKU, pull the description_short and ingredients.
            If the product isn't in the catalogue, you ASK for a mini-card and save it.
-        9. Pull references from any TikTok/IG/YT link Darya drops in the chat — read title,
-           views, description, then adapt the hook to Beloved Pets / Tobydic voice.
+        9. You CANNOT open links yourself — Instagram and TikTok don't serve video without a
+           login. A reference reaches you already watched: either the app downloaded the reel
+           and you see the video/frames (section «🎬 Похожий скрипт»), or Darya/Tanya described
+           it in words. NEVER invent what's inside a link you weren't shown — say you haven't
+           seen it and ask for the file, screenshots or a description.
         10. Track who's doing what — Dina renders video in Higgsfield, Vika designs graphics
             in Figma, Tanya owns TOBYDIC, Darya owns BelovedPets. Briefs go to the right
             person in the right place (Notion for Dina, Sheets comment for Vika).
@@ -763,6 +766,184 @@ def caption_from_media(images: list[bytes] | None = None,
                "(формат/кодек/размер) — подпись написана по описанию, не по картинке. "
                "Для точности добавь скриншот кадра в «Фото».\n\n" + out)
     return out
+
+
+# ─── Проверка заявлений: ловим то, что нам нельзя писать ───────────────────
+
+_FORBIDDEN = [
+    r"\bcure[sd]?\b", r"\bheal(s|ed|ing)?\b", r"\bmedicine\b", r"\bmedical\b",
+    r"\bFDA\b", r"\b100%\s*safe\b", r"\bguaranteed\b", r"\bclinically proven\b",
+    r"\bvet[- ](developed|recommended|approved|formulated)\b",
+    r"\bmade in (the )?usa\b", r"\bdiagnos(e|is|tic)\b",
+]
+
+
+def scan_claims(text: str) -> list[str]:
+    """Найти запрещённые заявления в готовом ТЗ/подписи.
+
+    Строки **Товар:** и **Референс:** пропускаем: в названиях SKU с этикетки законно
+    стоят Prevention/Treatment/Medication, и проверка на них раньше давала ложную
+    тревогу. Ищем по границе слова — «heal» внутри #HealthyPetsHappyLife не считается.
+    """
+    hits: list[str] = []
+    for line in (text or "").split("\n"):
+        low = line.strip().lower()
+        if low.startswith(("**товар:**", "**референс:**", "**исходник:**")):
+            continue
+        # «supplement, NOT a medicine» — наш собственный USP, а не заявление. Убираем
+        # фразу из строки, иначе проверка ругается на позиционирование бренда.
+        line = re.sub(r"not\s+(a\s+)?medicine", "", line, flags=re.I)
+        for pat in _FORBIDDEN:
+            for m in re.finditer(pat, line, re.I):
+                hits.append(m.group(0).strip())
+    seen, out = set(), []
+    for h in hits:
+        if h.lower() not in seen:
+            seen.add(h.lower())
+            out.append(h)
+    return out
+
+
+# ─── Референс → похожий скрипт (ссылка на чужой рилс → наше ТЗ) ────────────
+
+def script_from_reference(url: str = "", video_bytes: bytes | None = None,
+                          video_suffix: str = ".mp4", images: list[bytes] | None = None,
+                          mime_types: list[str] | None = None, brand: str = "BelovedPets",
+                          market: str = "US", product: str = "", extra: str = "",
+                          ref_meta: dict | None = None) -> str:
+    """Разобрать референс (чужой рилс) и написать НАШ похожий сценарий-ТЗ.
+
+    Дарья и Таня кидают ссылку на понравившийся рилс — Джек смотрит его и пишет ТЗ
+    в нашем формате (до 15 сек, озвучка + текст на экране в каждой сцене), под наш
+    товар и наши правила. Ссылка остаётся в ТЗ, чтобы Дина могла посмотреть исходник.
+
+    Порядок надёжности тот же, что у подписей: САМО ВИДЕО → кадры → только описание,
+    и на каждом уровне мы честно говорим, что Джек реально видел.
+    """
+    from models.llm import gemini_video, gemini_vision, smart_text
+    images = list(images or [])
+    mime_types = list(mime_types or ["image/jpeg"] * len(images))
+    ref_meta = ref_meta or {}
+
+    try:
+        brand_ctx = _brand_context()
+    except Exception:
+        brand_ctx = ""
+    try:
+        from models.jack_lessons import render_rules_for_prompt
+        team_rules = render_rules_for_prompt(brand)
+    except Exception:
+        team_rules = ""
+    try:
+        from models.products import resolve_products
+        found = resolve_products(product) if product else []
+        product_block = "\n".join(
+            f"- {p.get('title', '')} · {(p.get('description_short') or '')[:220]}" for p in found[:2]
+        )
+    except Exception:
+        product_block = ""
+
+    ref_line = f"Ссылка на референс: {url}" if url else "Ссылка на референс: (не дали)"
+    if ref_meta.get("title") or ref_meta.get("uploader"):
+        ref_line += f"\nЧей рилс: {ref_meta.get('uploader', '')} · «{ref_meta.get('title', '')[:120]}»"
+    if ref_meta.get("duration"):
+        ref_line += f"\nДлина референса: {ref_meta['duration']} сек"
+
+    _SEEN_VIDEO = (
+        "Перед тобой САМ РЕФЕРЕНС — видео целиком (движение, звук, текст на экране). "
+        "СНАЧАЛА посмотри его и разбери как креативщик: чем цепляет первые 2 секунды, "
+        "как устроен сюжет по сценам, где смена ритма, какой текст появляется и когда, "
+        "что говорит голос, где показывают продукт, почему это залетело."
+    )
+    _SEEN_FRAMES = (
+        "Перед тобой КАДРЫ референса по порядку (начало→конец). Посмотри их и разбери "
+        "структуру: хук, развитие, финал, какой текст на экране. Про звук и точный ритм "
+        "честно скажи, что судишь по кадрам."
+    )
+    _SEEN_NONE = (
+        "Видео референса посмотреть НЕ УДАЛОСЬ (платформа не отдала). Работай по описанию "
+        "ниже и ОБЯЗАТЕЛЬНО начни ответ строкой «ℹ️ Рилс я не смотрел — сценарий по "
+        "описанию». Значок именно ℹ️ — ответ, начинающийся со «⚠️», приложение считает "
+        "ошибкой генерации и показывает как сбой."
+    )
+
+    def _rules(seen_block: str) -> str:
+        return textwrap.dedent(f"""\
+        Ты Джек — senior SMM-креативщик бренда {brand} (pet supplements, рынок {market}).
+        Задача: взять ЧУЖОЙ рилс-референс и написать НАШ похожий сценарий (ТЗ для видео-креатора).
+
+        {seen_block}
+
+        {ref_line}
+        Наш товар/тема: {product or '(выбери из каталога бренда сам, по смыслу референса)'}
+        {('Что известно о товаре:' + chr(10) + product_block) if product_block else ''}
+        Пожелания: {extra or '(нет)'}
+
+        ЧТО ЗАИМСТВУЕМ: структуру, ритм, приём, тип хука, монтажную логику.
+        ЧТО НЕ ЗАИМСТВУЕМ: чужой бренд, чужой товар, чужой закадровый текст дословно,
+        музыку по названию. Не «перепиши их рилс», а «сделай наш по той же схеме».
+
+        ФОРМАТ ОТВЕТА — строго так, чистый markdown, без вступлений:
+
+        **🎬 Разбор референса:** 3-5 строк — приём, хук, структура по сценам словами,
+        почему работает. ВАЖНО: в разборе НЕ пиши тайминги в виде «0-3 сек —», описывай
+        словами («первые две секунды…»), иначе они попадут в таблицу видео-креатору.
+
+        **♻️ Что переносим:** 2-3 пункта — что именно берём из референса.
+
+        ---
+
+        **Формат:** Reel 9:16, до 15 сек
+        **Референс:** {url or '(нет)'}
+        **Товар:** полное точное название нашего товара
+        **Хук (0-2 сек):** что видит зритель в первые 2 секунды
+        **Сцены:**
+        - 0-4 сек — что в кадре и как снимать (по-русски) · на экране **"English text"** · озвучка: "English voiceover"
+        - (ещё 2-3 таких строки, тайминги подряд, финал ровно на 15 сек)
+        **Звук:** музыка/атмосфера коротко
+        **Подпись под пост (EN):** 2-4 строки живого английского
+
+        ЖЁСТКИЕ ПРАВИЛА (правила Дарьи и Дины, действуют всегда):
+        1. Рилс строго ДО 15 СЕКУНД, 3-4 сцены по 3-5 сек.
+        2. В КАЖДОЙ сцене обязательны И текст на экране, И озвучка. Порядок блоков в строке
+           менять нельзя — его разбирает код при отправке в Notion.
+        3. Озвучка — разговорный английский, 8-12 слов на сцену, вся вместе читается
+           как один связный голос.
+        4. Снимается телефоном дома за 20-30 минут. Без студии, сплит-скринов, сложного
+           монтажа и реквизита. Один кадр = одна мысль.
+        5. Товар называть полностью и точно, бенефиты только реальные, из контекста бренда.
+        6. COMPLIANCE: мы supplement, NOT medicine. НЕЛЬЗЯ cure/treat/heal/prevent/medicine/
+           FDA/100% safe/guaranteed/Made in USA и любые «vet-» заявления (vet-developed,
+           vet-recommended, vet-approved, vet-formulated) — их нам подтвердить нечем.
+           Можно supports, may help, gentle daily care, natural, holistic.
+        7. Товар: пиши про заданный. Если в референсе показан ДРУГОЙ наш товар и по смыслу
+           он уместнее — можно взять его, но скажи об этом одной строкой в разборе.
+
+        Контекст бренда: {brand_ctx[:1800]}
+        {('ПОСТОЯННЫЕ ИНСТРУКЦИИ КОМАНДЫ:' + chr(10) + team_rules[:2500]) if team_rules else ''}
+    """)
+
+    # 1. Главный путь — Джек смотрит сам референс.
+    if video_bytes:
+        out = gemini_video(_rules(_SEEN_VIDEO), video_bytes, _video_mime(video_suffix),
+                           images, mime_types)
+        if not out.startswith("⚠️"):
+            return out
+
+    # 2. Видео не прошло → кадры (свои скриншоты Дарьи или раскадровка).
+    frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
+    vis = images + frames
+    vis_mimes = mime_types + ["image/jpeg"] * len(frames)
+    if vis:
+        out = gemini_vision(_rules(_SEEN_FRAMES), vis, vis_mimes)
+        if not out.startswith("⚠️"):
+            if video_bytes and frames:
+                out = ("ℹ️ Само видео Gemini не взял — разбор по "
+                       f"{len(frames)} кадрам (звук и точный ритм не учтены).\n\n" + out)
+            return out
+
+    # 3. Ни видео, ни кадров — только описание, и мы это честно помечаем.
+    return smart_text(_rules(_SEEN_NONE))
 
 
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────

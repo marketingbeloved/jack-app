@@ -4,3 +4,4 @@ anthropic
 Pillow
 imageio
 imageio-ffmpeg
+yt-dlp

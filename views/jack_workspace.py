@@ -124,6 +124,28 @@ def _captions_delete(brand: str, idx: int) -> None:
         pass
 
 
+def _refscripts_load(brand: str) -> list:
+    """Скрипты, написанные по референсу — живут в общей базе, видят и Дарья, и Таня."""
+    from models import shared_store
+    return shared_store.get_json(f"ref_scripts_{brand.lower()}", []) or []
+
+
+def _refscripts_save(brand: str, url: str, product: str, text: str, seen: str) -> None:
+    from models import shared_store
+    items = _refscripts_load(brand)
+    items.insert(0, {"ts": _now_dt(), "url": url, "product": product,
+                     "seen": seen, "text": text})
+    shared_store.put_json(f"ref_scripts_{brand.lower()}", items[:30])
+
+
+def _refscripts_delete(brand: str, idx: int) -> None:
+    from models import shared_store
+    items = _refscripts_load(brand)
+    if 0 <= idx < len(items):
+        items.pop(idx)
+        shared_store.put_json(f"ref_scripts_{brand.lower()}", items)
+
+
 def _launch_bg_generation(req: dict, t: str) -> None:
     """Запустить генерацию рилса В ФОНЕ (отдельный поток) + показать, что Джек пишет.
     Результат подтянет polling-фрагмент — даже если соединение сбросится или вкладку
@@ -636,6 +658,144 @@ def render():
                              value=st.session_state["vika_text_result"],
                              height=340, key=f"vika_text_edit_{_vn}")
                 st.caption("✏️ Можно править прямо в поле, потом выделить и скопировать.")
+
+        # ─── Референс → похожий скрипт: ссылка на чужой рилс → наше ТЗ ─────────
+        with st.expander("🎬 Похожий скрипт — кинь ссылку на рилс, Джек напишет наш", expanded=True):
+            st.caption(
+                "Понравился чей-то рилс? Вставь ссылку — Джек посмотрит его, разберёт приём "
+                "и напишет НАШ сценарий по той же схеме (до 15 сек, озвучка + текст на экране). "
+                "Instagram отдаёт видео только со входом: если по ссылке скачать не получится, "
+                "залей видеофайл или 3-5 скриншотов ключевых моментов — этого Джеку хватит."
+            )
+            with st.form("ref_script", clear_on_submit=False):
+                ref_url = st.text_input(
+                    "🔗 Ссылка на рилс (Instagram / TikTok / YouTube)",
+                    placeholder="https://www.instagram.com/reel/…",
+                )
+                rf1, rf2 = st.columns(2)
+                ref_video = rf1.file_uploader(
+                    "🎬 Видеофайл (если ссылка не качается)", type=["mp4", "mov", "m4v", "webm"],
+                    accept_multiple_files=False, key="ref_video",
+                )
+                ref_imgs = rf2.file_uploader(
+                    "🖼 Или скриншоты по порядку (2-6)", type=["jpg", "jpeg", "png", "webp"],
+                    accept_multiple_files=True, key="ref_imgs",
+                )
+                rc1, rc2 = st.columns(2)
+                ref_product = rc1.text_input("Наш товар/тема", placeholder="напр. Calming Chews")
+                ref_market = rc2.selectbox("Рынок", ["US", "UK", "CA"], index=0, key="ref_market")
+                ref_extra = st.text_area(
+                    "Что зацепило / пожелания", height=70,
+                    placeholder="напр. «нравится хук с шёпотом и субтитрами, хочу так же про блох»",
+                )
+                ref_go = st.form_submit_button("🎬 Написать похожий скрипт", type="primary",
+                                               use_container_width=True)
+                if ref_go:
+                    if not (ref_url.strip() or ref_video or ref_imgs or ref_extra.strip()):
+                        st.warning("Вставь ссылку, или залей видео/скриншоты, или опиши рилс словами.")
+                    else:
+                        from models.jack_engine import script_from_reference
+                        from models import reference_dl
+                        vid_data = ref_video.getvalue() if ref_video else None
+                        vid_suffix = ("." + ref_video.name.rsplit(".", 1)[-1]) if ref_video and "." in ref_video.name else ".mp4"
+                        meta, dl_note = {}, ""
+                        # Файл важнее ссылки: если Дарья уже залила видео — не тратим время на скачивание.
+                        if ref_url.strip() and not vid_data:
+                            with st.spinner("⬇️ Пробую скачать рилс по ссылке…"):
+                                data, suffix, meta = reference_dl.fetch_video(ref_url.strip())
+                            if data:
+                                vid_data, vid_suffix = data, suffix
+                                dl_note = (f"✅ Рилс скачан ({meta.get('platform', '')}, "
+                                           f"{meta.get('size_mb', '?')} МБ, доступ: {meta.get('via', '')}) "
+                                           "— Джек смотрит его целиком.")
+                            else:
+                                dl_note = "⚠️ " + str(meta.get("error", "скачать не удалось"))
+                        img_data = [f.getvalue() for f in ref_imgs] if ref_imgs else []
+                        img_mimes = [f.type or "image/jpeg" for f in ref_imgs] if ref_imgs else []
+                        if vid_data:
+                            spin = "🐾 Джек смотрит референс и пишет наш сценарий…"
+                        elif img_data:
+                            spin = f"🐾 Джек смотрит {len(img_data)} кадр(а) и пишет сценарий…"
+                        else:
+                            spin = "🐾 Джек пишет сценарий по описанию…"
+                        with st.spinner(spin):
+                            ref_txt = script_from_reference(
+                                url=ref_url.strip(), video_bytes=vid_data, video_suffix=vid_suffix,
+                                images=img_data, mime_types=img_mimes, brand=brand,
+                                market=ref_market, product=ref_product.strip(),
+                                extra=ref_extra.strip(), ref_meta=meta,
+                            )
+                        seen = "видео" if vid_data else ("кадры" if img_data else "описание")
+                        st.session_state["ref_script_result"] = ref_txt
+                        st.session_state["ref_script_note"] = dl_note
+                        st.session_state["ref_script_url"] = ref_url.strip()
+                        st.session_state["ref_script_product"] = ref_product.strip()
+                        st.session_state["ref_script_n"] = st.session_state.get("ref_script_n", 0) + 1
+                        if not ref_txt.startswith("⚠️"):
+                            _refscripts_save(brand, ref_url.strip(), ref_product.strip(), ref_txt, seen)
+            if st.session_state.get("ref_script_note"):
+                st.caption(st.session_state["ref_script_note"])
+            if st.session_state.get("ref_script_result"):
+                st.markdown("---")
+                _rn = st.session_state.get("ref_script_n", 0)
+                st.text_area("Сценарий — правь прямо здесь, потом заводи в план",
+                             value=st.session_state["ref_script_result"],
+                             height=420, key=f"ref_script_edit_{_rn}")
+                st.caption("✏️ Правки в поле учитываются при заводе поста в план.")
+                # Проверка заявлений: лучше поймать «vet-recommended» здесь, чем в Notion у Дины.
+                from models.jack_engine import scan_claims
+                _bad = scan_claims(st.session_state.get(f"ref_script_edit_{_rn}")
+                                   or st.session_state["ref_script_result"])
+                if _bad:
+                    st.warning("⚠️ Нам такое писать нельзя: " + ", ".join(f"«{b}»" for b in _bad)
+                               + ". Поправь в тексте выше — или перегенери с уточнением.")
+                else:
+                    st.caption("✅ Запрещённых заявлений не нашёл.")
+                with st.form(f"ref_to_plan_{_rn}"):
+                    st.markdown("**➕ Завести пост в плане с этим ТЗ**")
+                    pc1, pc2, pc3 = st.columns([1, 1, 1])
+                    ref_date = pc1.date_input("Дата", key=f"ref_date_{_rn}")
+                    ref_type = pc2.selectbox(
+                        "Категория", ["engaging", "selling", "viral", "neutral"],
+                        format_func=lambda t: {"engaging": "Вовлекающий", "selling": "Продающий",
+                                               "viral": "Вирусный", "neutral": "Без цвета"}[t],
+                        key=f"ref_type_{_rn}")
+                    ref_owner = pc3.selectbox("Исполнитель", ["dina", "vika", "tanya"],
+                                              format_func=lambda s: {"dina": "Дина", "vika": "Вика",
+                                                                     "tanya": "Таня"}[s],
+                                              key=f"ref_owner_{_rn}")
+                    ref_title = st.text_input("Тема поста в календаре",
+                                              value=(st.session_state.get("ref_script_product") or "рилс по референсу"),
+                                              key=f"ref_title_{_rn}")
+                    if st.form_submit_button("➕ Завести в план", use_container_width=True):
+                        from views.content_plan import add_plan_post
+                        from models import plan_briefs
+                        text = st.session_state.get(f"ref_script_edit_{_rn}") or st.session_state["ref_script_result"]
+                        dk = ref_date.strftime("%d.%m")
+                        pid = add_plan_post(brand, dk, ref_title.strip() or "рилс по референсу",
+                                            ref_type, "Trend", ref_owner)
+                        plan_briefs.save(pid, text, title=ref_title.strip(), pillar="Trend",
+                                         for_who=ref_owner, updated=_now_hm(),
+                                         link=st.session_state.get("ref_script_url", ""))
+                        st.success(f"✓ {dk} — пост заведён с готовым ТЗ. Видно всей команде, "
+                                   f"дальше можно отправить в Notion из календаря.")
+
+            # ─── 🗂 Сохранённые скрипты по референсам ───────────────────────
+            _saved_refs = _refscripts_load(brand)
+            if _saved_refs:
+                st.markdown("---")
+                st.markdown(f"**🗂 Скрипты по референсам ({len(_saved_refs)})**")
+                for _ri, _ref in enumerate(_saved_refs):
+                    _h = " · ".join(x for x in [_ref.get("product") or "без товара",
+                                                _ref.get("ts", ""),
+                                                f"смотрел: {_ref.get('seen', '')}"] if x)
+                    rr1, rr2 = st.columns([5, 1])
+                    rr1.caption(f"#{_ri + 1} · {_h}" + (f" · {_ref.get('url', '')}" if _ref.get("url") else ""))
+                    if rr2.button("🗑", key=f"delref_{brand}_{_ri}", help="Удалить этот скрипт"):
+                        _refscripts_delete(brand, _ri)
+                        st.rerun()
+                    st.text_area("сохранённый скрипт", value=_ref.get("text", ""), height=170,
+                                 key=f"savedref_{brand}_{_ri}", label_visibility="collapsed")
 
         # ─── Captions: upload a finished reel video / photos → Jack writes the caption ─
         with st.expander("✍️ Captions — залей видео/фото, Джек напишет подпись", expanded=True):
