@@ -1122,6 +1122,7 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
                 title=title, product_name=product, market=market,
                 drive_url=drive_url, listing_url=listing_url, end_date=end_date,
                 about=about, action_items=action_items, brand=brand,
+                body=concept.get("brief_text", ""),
             )
         scenes_table = _scenes_to_table(concept)
         return create_reel_brief(

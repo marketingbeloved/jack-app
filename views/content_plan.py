@@ -696,6 +696,8 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         sent = entry.get("notion_url") or st.session_state.get(f"notion_ok_{pid}")
         if sent:
             st.success(f"📤 Уже в Notion у Дины: {sent}")
+            if st.session_state.get(f"notion_note_{pid}"):
+                st.warning("⚠️ " + st.session_state[f"notion_note_{pid}"])
             resend = st.checkbox("отправить заново (создаст вторую страницу)",
                                  key=f"notion_force_{pid}")
         else:
@@ -714,6 +716,10 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
                 st.info(res["skipped"])
             else:
                 st.session_state[f"notion_ok_{pid}"] = res.get("url", "")
+                # Предупреждение живёт в session_state: сразу после rerun сообщение,
+                # показанное здесь, исчезло бы вместе с прогоном скрипта.
+                if res.get("note"):
+                    st.session_state[f"notion_note_{pid}"] = res["note"]
                 st.rerun()
 
     b1, b2 = st.columns(2)

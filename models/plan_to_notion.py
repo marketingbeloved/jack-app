@@ -108,6 +108,9 @@ def build_concept(post: dict, brief_text: str, brand: str = "BelovedPets",
         "scenes": _scenes(text),
         # Готовая таблица — publish_to_notion возьмёт её вместо пересборки моделью.
         "scene_rows": scene_rows(text),
+        # Полный текст ТЗ: нужен, когда таблицу сцен собрать не из чего — тогда
+        # страница уходит с ТЗ целиком, а не отбивается ошибкой.
+        "brief_text": text,
     }
 
 
@@ -129,9 +132,14 @@ def push_post(post: dict, brief: dict, *, brand: str = "BelovedPets", market: st
         return {"skipped": "Это ТЗ уже в Notion — второй раз не отправляю.", "url": already}
 
     concept = build_concept(post, text, brand=brand, market=market)
+    # Сцен нет — это НЕ повод не отправлять. Так написаны анимации, life pic и часть
+    # ТЗ по Tobydic: таблицу собрать не из чего, но Дине нужен сам текст. Раньше
+    # кнопка в этом случае отбивалась ошибкой, и ТЗ до Notion не доезжало вообще.
+    note = ""
     if not concept["scenes"]:
-        return {"error": "В ТЗ не нашлись ни сцены с таймингом, ни слайды — "
-                         "Notion-таблицу собрать не из чего. Проверь текст ТЗ."}
+        concept["format"] = "static"
+        note = ("Сцен с таймингом в этом ТЗ нет — отправил текстом, без таблицы. "
+                "Нужна таблица для монтажа — попроси Джека переписать ТЗ сценами.")
 
     end_date = _end_date(date_key)
     if not end_date:
@@ -141,6 +149,8 @@ def push_post(post: dict, brief: dict, *, brand: str = "BelovedPets", market: st
     from models.jack_engine import publish_to_notion
     res = publish_to_notion(concept, drive_url=(brief or {}).get("link", ""),
                             listing_url="", end_date=end_date)
+    if note and not res.get("error"):
+        res["note"] = note
     if res.get("url"):
         from models import plan_briefs
         b = brief or {}

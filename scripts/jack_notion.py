@@ -93,7 +93,10 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        sys.exit(f"Notion API error {e.code} on {method} {path}:\n{body}")
+        # Раньше здесь стоял sys.exit — и в Streamlit это убивало прогон скрипта
+        # молча: кнопка «ТЗ Дине в Notion» просто ничего не делала, без ошибки на
+        # экране (SystemExit — не Exception, наш except его не ловил).
+        raise RuntimeError(f"Notion API error {e.code} on {method} {path}: {body[:400]}")
 
 
 def _rich_text(text: str) -> list:
@@ -117,6 +120,26 @@ def _paragraph(text: str) -> dict:
         "type": "paragraph",
         "paragraph": {"rich_text": _rich_text(text)},
     }
+
+
+def _paragraphs(text: str, limit: int = 1800) -> list:
+    """Длинный текст → несколько абзацев: в один rich_text Notion берёт до 2000 символов.
+
+    Резать стараемся по строкам, чтобы не рвать фразу и разметку сцен посередине.
+    """
+    out, buf = [], ""
+    for line in (text or "").split("\n"):
+        if len(buf) + len(line) + 1 > limit and buf:
+            out.append(_paragraph(buf.rstrip()))
+            buf = ""
+        if len(line) > limit:                      # одна строка длиннее лимита
+            for i in range(0, len(line), limit):
+                out.append(_paragraph(line[i:i + limit]))
+            continue
+        buf += line + "\n"
+    if buf.strip():
+        out.append(_paragraph(buf.rstrip()))
+    return out
 
 
 def _todo(text: str, checked: bool = False) -> dict:
@@ -278,8 +301,13 @@ def create_static_brief(
     action_items: list[str] | None = None,
     documents_urls: list[str] | None = None,
     brand: str = "BelovedPets",
+    body: str = "",
 ) -> dict:
     """Создать страницу для статичного поста (без таблицы сценария).
+
+    body — полный текст ТЗ. Нужен, когда сцен с таймингом в ТЗ нет (анимация,
+    life pic, карусель): таблицу собрать не из чего, но Дина всё равно должна
+    получить ТЗ целиком, а не пустую страницу.
 
     Обязательно: title + product_name + market + drive_url + listing_url.
     """
@@ -293,7 +321,10 @@ def create_static_brief(
     children = [_heading(3, "About project")]
     children.extend(_product_block(product_name, market, drive_url, listing_url))
     if about:
-        children.append(_paragraph(about))
+        children.extend(_paragraphs(about))
+    if body:
+        children.append(_heading(3, "ТЗ"))
+        children.extend(_paragraphs(body))
     children.append(_heading(3, "Action items"))
     for item in action_items:
         children.append(_todo(item))
