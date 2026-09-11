@@ -69,10 +69,14 @@ def _attempts(url: str) -> list[dict]:
     cp = _cookies_path()
     if cp:
         tries.append({"cookiefile": cp})
-    # Локально на маке Дарьи в браузере уже есть живая сессия Instagram. В облаке этих
-    # браузеров нет — попытка просто не сработает и мы пойдём дальше.
-    for browser in ("chrome", "safari", "firefox", "edge"):
-        tries.append({"cookiesfrombrowser": (browser, None, None, None)})
+    # Cookies из браузера — ТОЛЬКО по явному разрешению. По умолчанию не лезем: macOS
+    # на Chrome спрашивает пароль связки ключей отдельным окном («Chrome Safe Storage»),
+    # а Safari отдаёт «Operation not permitted» без Full Disk Access. Дарья получила это
+    # окно на ровном месте, когда Instagram просто не отдал видео.
+    browsers = os.environ.get("REF_BROWSER_COOKIES", "").strip()
+    if browsers:
+        for browser in [b.strip() for b in browsers.split(",") if b.strip()]:
+            tries.append({"cookiesfrombrowser": (browser, None, None, None)})
     return tries
 
 
