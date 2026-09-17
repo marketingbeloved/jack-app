@@ -99,8 +99,13 @@ def _load_brand_file(fname: str, max_chars: int, home_path: Path) -> str:
     return _load_text(BRAND_DATA_DIR / fname, max_chars)
 
 
-def _brand_context() -> str:
-    """Pull all the brand intel Jack should know cold."""
+def _brand_context(brand: str = "BelovedPets") -> str:
+    """Pull all the brand intel Jack should know cold.
+
+    brand нужен из-за каталога: в products.json только SKU BelovedPets, и Тане его
+    подсовывать нельзя. Раньше сюда уходило лишь «Total 58 SKUs: {категории}» — самих
+    названий Джек не видел, поэтому и выдумывал товары и терял вкус.
+    """
     home = Path.home()
     parts = []
 
@@ -129,14 +134,15 @@ def _brand_context() -> str:
     except Exception:
         pass
 
-    # Catalog
+    # Catalog — точные названия со вкусами, а не только счётчик по категориям
     try:
-        from models.products import all_products, categories, global_compliance as gc_fn
+        from models.products import categories, global_compliance as gc_fn, catalog_block, product_rule
         cats = categories()
         gc = gc_fn()
         parts.append(
-            f"=== Catalog ===\nTotal {sum(cats.values())} SKUs: "
-            f"{cats}\nGlobal compliance: {json.dumps(gc, ensure_ascii=False)}"
+            f"=== Catalog ===\nTotal {sum(cats.values())} SKUs: {cats}\n"
+            f"Global compliance: {json.dumps(gc, ensure_ascii=False)}\n\n"
+            + catalog_block(brand) + "\n" + product_rule(brand)
         )
     except Exception:
         pass
@@ -574,7 +580,7 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
     """
     from models.llm import gemini_vision
     try:
-        brand_ctx = _brand_context()
+        brand_ctx = _brand_context(brand)
     except Exception:
         brand_ctx = ""
     prompt = textwrap.dedent(f"""\
@@ -678,7 +684,7 @@ def caption_from_media(images: list[bytes] | None = None,
     mime_types = list(mime_types or ["image/jpeg"] * len(images))
 
     try:
-        brand_ctx = _brand_context()
+        brand_ctx = _brand_context(brand)
     except Exception:
         brand_ctx = ""
 
@@ -804,6 +810,51 @@ def scan_claims(text: str) -> list[str]:
     return out
 
 
+# ─── Приёмка ТЗ: товары из библиотеки, стиль карусели, заявления ───────────
+
+def check_brief(text: str, brand: str = "BelovedPets") -> list[str]:
+    """Собрать ВСЕ претензии к готовому ТЗ. Пустой список — ТЗ принято.
+
+    Три проверки, каждая закрывает конкретную жалобу команды:
+      • товары — Джек выдумывал SKU и не называл вкус;
+      • графика — Вика получала карусели-близнецы с прыгающими плашками;
+      • заявления — нам нельзя обещать лечение.
+    """
+    problems: list[str] = []
+    try:
+        from models.products import validate_products
+        problems += validate_products(text, brand)
+    except Exception:
+        pass
+    try:
+        from models.visual_system import validate_layout
+        problems += validate_layout(text)
+    except Exception:
+        pass
+    bad = scan_claims(text)
+    if bad:
+        problems.append("запрещённые заявления: " + ", ".join(f"«{b}»" for b in bad))
+    return problems
+
+
+def _retry_with_problems(user: str, system: str, out: str, problems: list[str],
+                         brand: str, timeout: int = 150) -> str:
+    """Один повтор с перечнем претензий. Если и он не проходит — честно пишем сверху."""
+    fix = (user + "\n\nТВОЙ ПРЕДЫДУЩИЙ ВАРИАНТ ЗАБРАКОВАН. Претензии:\n"
+           + "\n".join(f"- {p}" for p in problems)
+           + "\n\nПерепиши ТЗ целиком, устранив КАЖДУЮ претензию. Товар бери дословно из "
+             "библиотеки выше, вместе со вкусом. Ответ — только готовое ТЗ.")
+    second = call_claude(fix, system, timeout=timeout)
+    if second.startswith("__ERROR__"):
+        return out
+    second = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", second.strip())
+    left = check_brief(second, brand)
+    if not left:
+        return second
+    return ("⚠️ Проверка ТЗ: " + "; ".join(left)
+            + "\n(исправь вручную — Джек не смог со второй попытки)\n\n" + second)
+
+
 # ─── Референс → похожий скрипт (ссылка на чужой рилс → наше ТЗ) ────────────
 
 def script_from_reference(url: str = "", video_bytes: bytes | None = None,
@@ -826,7 +877,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
     ref_meta = ref_meta or {}
 
     try:
-        brand_ctx = _brand_context()
+        brand_ctx = _brand_context(brand)
     except Exception:
         brand_ctx = ""
     try:
@@ -835,13 +886,15 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
     except Exception:
         team_rules = ""
     try:
-        from models.products import resolve_products
+        from models.products import resolve_products, catalog_block, product_rule
         found = resolve_products(product) if product else []
         product_block = "\n".join(
             f"- {p.get('title', '')} · {(p.get('description_short') or '')[:220]}" for p in found[:2]
         )
+        catalog = catalog_block(brand) + "\n" + product_rule(brand)
     except Exception:
         product_block = ""
+        catalog = ""
 
     ref_line = f"Ссылка на референс: {url}" if url else "Ссылка на референс: (не дали)"
     if ref_meta.get("title") or ref_meta.get("uploader"):
@@ -920,15 +973,37 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
            он уместнее — можно взять его, но скажи об этом одной строкой в разборе.
 
         Контекст бренда: {brand_ctx[:1800]}
+        {catalog}
         {('ПОСТОЯННЫЕ ИНСТРУКЦИИ КОМАНДЫ:' + chr(10) + team_rules[:2500]) if team_rules else ''}
     """)
+
+    def _accept(out: str) -> str:
+        """Приёмка: товар из библиотеки со вкусом + заявления. Один повтор текстом.
+
+        Повтор идёт через текстовую модель, а не через повторный просмотр видео —
+        разбор уже сделан, переписать надо только ТЗ.
+        """
+        problems = check_brief(out, brand)
+        if not problems:
+            return out
+        fix = ("Вот ТЗ, которое ты написал:\n\n" + out + "\n\nОно забраковано. Претензии:\n"
+               + "\n".join(f"- {p}" for p in problems)
+               + "\n\n" + catalog + "\n\nПерепиши ТЗ целиком, устранив КАЖДУЮ претензию. "
+               "Структуру и разбор референса сохрани. Ответ — только готовое ТЗ.")
+        second = smart_text(fix)
+        if second.startswith("⚠️"):
+            return out
+        if not check_brief(second, brand):
+            return second
+        return ("⚠️ Проверка ТЗ: " + "; ".join(check_brief(second, brand))
+                + "\n(поправь вручную)\n\n" + second)
 
     # 1. Главный путь — Джек смотрит сам референс.
     if video_bytes:
         out = gemini_video(_rules(_SEEN_VIDEO), video_bytes, _video_mime(video_suffix),
                            images, mime_types)
         if not out.startswith("⚠️"):
-            return out
+            return _accept(out)
 
     # 2. Видео не прошло → кадры (свои скриншоты Дарьи или раскадровка).
     frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
@@ -937,13 +1012,15 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
     if vis:
         out = gemini_vision(_rules(_SEEN_FRAMES), vis, vis_mimes)
         if not out.startswith("⚠️"):
+            out = _accept(out)
             if video_bytes and frames:
                 out = ("ℹ️ Само видео Gemini не взял — разбор по "
                        f"{len(frames)} кадрам (звук и точный ритм не учтены).\n\n" + out)
             return out
 
     # 3. Ни видео, ни кадров — только описание, и мы это честно помечаем.
-    return smart_text(_rules(_SEEN_NONE))
+    out = smart_text(_rules(_SEEN_NONE))
+    return out if out.startswith("⚠️") else _accept(out)
 
 
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
@@ -982,14 +1059,16 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         format_block = textwrap.dedent("""\
             Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
 
-            **Формат:** Reel / Video (≈N сек)
+            **Формат:** Reel 9:16, до 15 сек
+            **Товар:** ПОЛНОЕ название из библиотеки, слово в слово, ВМЕСТЕ СО ВКУСОМ
             **Концепт:** 1 фраза — что это и зачем (на русском)
-            **Сцены (тайминг):**
-            - 0-3 сек — что в кадре (РУС) · overlay-текст "English" · voiceover "English"
-            - 3-7 сек — …
-            **CTA:** финальная строка / overlay (English)
-            **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон
-            **Референс / packshot:** какой файл/товар взять из Drive (назови словами)""")
+            **Хук (0-2 сек):** что видит зритель в первые 2 секунды
+            **Сцены:**
+            - 0-4 сек — что в кадре и как снимать (РУС) · на экране **"English"** · озвучка: "English"
+            - (ещё 2-3 строки, тайминги подряд, финал ровно на 15 сек)
+            **Звук:** музыка/атмосфера коротко
+            **Подпись под пост (EN):** 2-4 строки
+            Порядок блоков в строке сцены менять нельзя — его разбирает код при отправке в Notion.""")
     else:
         format_block = textwrap.dedent("""\
             Сначала сам пойми по теме: это статичный пост (life pic / 1 кадр) или карусель (3-6 слайдов)?
@@ -997,20 +1076,37 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
 
             Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
 
-            **Формат:** Static / Carousel (N слайдов)
+            **Формат:** Static (1 кадр) или Carousel (3-6 слайдов) — выбери сам по теме
+            **Товар:** ПОЛНОЕ название из библиотеки, слово в слово, ВМЕСТЕ СО ВКУСОМ
             **Концепт:** 1 фраза — что это и зачем (на русском)
-            **Layout по слайдам:**
-            - Слайд 1 — что в кадре (РУС) · overlay-текст "English copy" · что выделить
-            - Слайд 2 — …
-            (для static — один пункт «Кадр»)
-            **Текст под набор (English, готовый к типсету):** заголовок + 1-2 строки бенефита
-            **Бренд-стиль:** cream #FAF8F3 / sage-green #4A6B3A, тёплый натуральный тон, светлые тона
-            **Packshot / референс:** какой файл товара взять из Drive (назови словами)""")
+            **Холст:** 1080×1350 (4:5), поля 80 px, нижние 120 px свободны
+            **Акцент набора:** один категорийный цвет из визуальной системы (укажи HEX и почему)
+            **Слайды:**
+            - **Слайд 1 · Хук** — Layout: <композиция> · Текст EN: "<≤6 слов>" / подстрочник "<≤12 слов>" · Плашка: <позиция, одинаковая во всех слайдах> · Акцент: <HEX>
+            - **Слайд 2 · <роль>** — Layout: <ДРУГАЯ композиция> · Текст EN: "…" · Плашка: <та же позиция> · Акцент: <тот же HEX>
+            - (дальше по ролям: проблема → объяснение → продукт → финал/CTA)
+            (для static — один пункт «Кадр» в том же формате)
+            **Packshot:** какой файл товара взять с Диска (назови словами), этикетку не перекрывать
+            Блоки Layout / Текст / Плашка / Акцент обязательны в КАЖДОЙ строке слайда — без них
+            ТЗ бракуется. Две соседние строки с одинаковым Layout — тоже брак.""")
     try:
         from models.jack_lessons import render_rules_for_prompt as _rules
         system = _system_prompt() + _rules(brand)
     except Exception:
         system = _system_prompt()
+    # Библиотека товаров и правило про вкус — в КАЖДОЕ ТЗ, это главная причина брака.
+    try:
+        from models.products import catalog_block, product_rule
+        system += "\n\n" + catalog_block(brand) + "\n" + product_rule(brand)
+    except Exception:
+        pass
+    # Визуальная система — только для графики: в видео-ТЗ она лишний шум.
+    if not is_video:
+        try:
+            from models.visual_system import visual_block
+            system += "\n" + visual_block(f"{title} {extra}")
+        except Exception:
+            pass
     user = textwrap.dedent(f"""\
         Напиши ТЗ для {who.upper()} ({role_desc}).
         Это коммент к ячейке контент-плана — как Дарья раньше оставляла коммент в Google-таблице.
@@ -1027,16 +1123,24 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
 
         {format_block}
 
-        COMPLIANCE — строго: НЕ писать cure / treat / heal / FDA / 100% safe / guaranteed.
-        Можно: supports, may help with, gentle daily care, natural, vet-formulated, holistic.
-        Supplement, NOT medicine. НЕ выдумывай цены/скидки/акции, если их нет в пожеланиях.
+        COMPLIANCE — строго: НЕ писать cure / treat / heal / prevent / FDA / 100% safe /
+        guaranteed и любые «vet-» заявления (vet-developed, vet-recommended, vet-formulated) —
+        подтвердить их нечем. Можно: supports, may help with, gentle daily care, natural,
+        holistic. Supplement, NOT medicine.
+        НЕ выдумывай цены/скидки/акции, если их нет в пожеланиях.
+        ТОВАР — только из библиотеки, дословно и со вкусом. Выдуманный товар = брак ТЗ.
     """)
     out = call_claude(user, system, timeout=150)
     if out.startswith("__ERROR__"):
         return "⚠️ " + out.replace("__ERROR__", "").strip()
     # Strip stray code fences if the model added them
     out = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", out.strip())
-    return out.strip()
+    out = out.strip()
+    # Приёмка: товар из библиотеки со вкусом, стиль карусели, заявления. Один повтор.
+    problems = check_brief(out, brand)
+    if problems:
+        out = _retry_with_problems(user, system, out, problems, brand)
+    return out
 
 
 # ─── Notion publish (Approve → write ТЗ to Dina) ────────────────────────────

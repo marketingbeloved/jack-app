@@ -133,6 +133,13 @@ def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
                 "линейками. Не знаешь точное название — напиши общее («наши капли»), но чужое "
                 "имя не подставляй.\n")
 
+    # Полные названия со вкусом — через общую библиотеку. Раньше здесь стоял
+    # short_title(..., 50), и хвост «(Salmon (for Cats))» отрезался вместе со вкусом.
+    try:
+        from models.products import catalog_block as _cb, product_rule as _pr
+        return "\n" + _cb(brand, limit) + "\n" + _pr(brand) + "\n"
+    except Exception:
+        pass
     try:
         from models.products import all_products, short_title
     except Exception:
