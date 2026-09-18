@@ -432,7 +432,12 @@ def render():
     st.markdown(_GRID_CSS, unsafe_allow_html=True)
 
     mc1, _ = st.columns([1, 3])
-    market = mc1.selectbox("Рынок для ТЗ Вики", ["UK", "US", "CA"], index=0, key="vika_market")
+    # По умолчанию рынка НЕТ. Раньше здесь первым стоял UK, и он молча уезжал во все ТЗ
+    # и на страницы Дины в Notion — хотя никто его не выбирал.
+    market = mc1.selectbox(
+        "Рынок (если важен)", ["— не указывать", "US", "UK", "CA"], index=0,
+        key="vika_market", help="Пусто — Джек не пишет рынок в ТЗ и не ставит его Дине в Notion.")
+    market = "" if market.startswith("—") else market
     st.caption("Нажми **➕ ТЗ** прямо в ячейке → Джек напишет ТЗ для Вики, оно сохранится в коммент (видят все 4). 💬 = ТЗ уже есть.")
 
     owners = _team_owners()
@@ -663,7 +668,9 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
                           placeholder="напр.: какой формат тут зайдёт? стоит карусель или один кадр?")
         if st.button("🐾 Спросить", key=f"askbtn_{pid}", use_container_width=True) and q.strip():
             from models.jack_chat import jack_chat_reply
-            ctx = f"Это пост из контент-плана: тема «{item['title']}», пиллар {item['pillar']}, рынок {market}. Дарья хочет: {wish or '(пока не сказала)'}."
+            ctx = (f"Это пост из контент-плана: тема «{item['title']}», пиллар {item['pillar']}"
+                   + (f", рынок {market}" if market else "")
+                   + f". Дарья хочет: {wish or '(пока не сказала)'}.")
             with st.spinner("🐾 Джек думает…"):
                 reply = jack_chat_reply([], f"{ctx}\n\nВопрос: {q}", refs=link or "", brand=brand)
             st.session_state[f"jack_reply_{pid}"] = reply
@@ -698,11 +705,13 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
             st.success(f"📤 Уже в Notion у Дины: {sent}")
             if st.session_state.get(f"notion_note_{pid}"):
                 st.warning("⚠️ " + st.session_state[f"notion_note_{pid}"])
-            resend = st.checkbox("отправить заново (создаст вторую страницу)",
-                                 key=f"notion_force_{pid}")
+            resend = st.checkbox("обновить ТЗ у Дины (перезапишет ту же страницу)",
+                                 key=f"notion_force_{pid}",
+                                 help="Правки темы и ТЗ уедут в ту же страницу Notion. "
+                                      "Ссылка не поменяется, статус Дины не сбросится.")
         else:
             resend = False
-        label = "📤 Отправить заново" if sent else "📤 Написать ТЗ Дине в Notion"
+        label = "📤 Обновить ТЗ у Дины" if sent else "📤 Написать ТЗ Дине в Notion"
         if st.button(label, key=f"notion_{pid}", use_container_width=True,
                      disabled=bool(sent) and not resend,
                      help="Уходит только сейчас, по этой кнопке. Автоматически — никогда."):

@@ -92,14 +92,31 @@ def _is_static(post: dict, text: str) -> bool:
     return False
 
 
+def _market_from_text(text: str) -> str:
+    """Рынок — ТОЛЬКО если он явно назван в самом ТЗ.
+
+    Дарья: «пусть рынок не ставит, если этого нет чётко в ТЗ». Ничего не угадываем:
+    нет упоминания — возвращаем пусто, и строки про рынок на странице не будет.
+    """
+    t = (text or "")
+    if re.search(r"\b(amazon\s*uk|uk\b|united kingdom|британ)", t, re.I):
+        return "UK"
+    if re.search(r"\b(amazon\s*ca|canada|канад)\b", t, re.I):
+        return "CA"
+    if re.search(r"\b(amazon\s*us|tiktok shop|chewy|walmart|\bus\b|сша)\b", t, re.I):
+        return "US"
+    return ""
+
+
 def build_concept(post: dict, brief_text: str, brand: str = "BelovedPets",
-                  market: str = "US") -> dict:
+                  market: str = "") -> dict:
     """Собрать из поста плана словарь в том виде, который ждёт publish_to_notion."""
     text = brief_text or ""
     return {
         "title": (post.get("title") or "").strip() or "(без темы)",
         "product": _field(text, "Товар в кадре", "Товар", "Packshot"),
-        "market": market,
+        # Рынок из интерфейса, если выбран; иначе — только если он прямо назван в ТЗ.
+        "market": market or _market_from_text(text),
         "brand": brand,
         "hook": _field(text, "Хук", "Overlay сверху", "Hook"),
         "angle": _field(text, "Концепт", "Формат"),
@@ -147,8 +164,15 @@ def push_post(post: dict, brief: dict, *, brand: str = "BelovedPets", market: st
                          f"страница уедет без срока. Проверь дату в плане."}
 
     from models.jack_engine import publish_to_notion
+    # «Отправить заново» по посту, который уже есть у Дины, = ОБНОВИТЬ её страницу.
+    # Раньше это создавало вторую страницу, и Дина видела два ТЗ на один пост.
     res = publish_to_notion(concept, drive_url=(brief or {}).get("link", ""),
-                            listing_url="", end_date=end_date)
+                            listing_url="", end_date=end_date,
+                            update_url=(already if force and already else ""))
+    if res.get("updated"):
+        res["url"] = already or res.get("url", "")
+        res["note"] = ((res.get("note", "") + " ") if res.get("note") else "") + \
+            "Обновил ту же страницу у Дины — новая не создавалась, ссылка прежняя."
     if note and not res.get("error"):
         res["note"] = note
     if res.get("url"):

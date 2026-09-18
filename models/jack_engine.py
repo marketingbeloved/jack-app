@@ -1026,7 +1026,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
 
 def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
-                   market: str = "UK", extra: str = "", link: str = "",
+                   market: str = "", extra: str = "", link: str = "",
                    for_name: str = "Вика", for_role: str = "graphics") -> str:
     """Write a ready-to-read ТЗ for ONE plan cell, addressed to the chosen executor.
 
@@ -1113,7 +1113,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
 
         Ячейка контент-плана:
         - Бренд: {brand}
-        - Рынок: {market}
+        - Рынок: {market or 'НЕ УКАЗАН — не выдумывай и не пиши рынок в ТЗ вообще'}
         - Тема поста (из плана): "{title}"
         - Пиллар: {pillar or '(определи сам по теме)'}
         {link_line}
@@ -1189,7 +1189,8 @@ def _scenes_to_table(concept: dict) -> list[dict]:
     return [{"time": "", "video": s, "tos": "", "voiceover": ""} for s in scenes]
 
 
-def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date: str | None = None) -> dict:
+def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date: str | None = None,
+                      update_url: str = "") -> dict:
     """Create a brief page for Dina in the Notion Videos DB from an approved concept.
 
     Title = concept title (как в КП), date = end_date, scenes copied as a 4-column
@@ -1210,7 +1211,8 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
 
     title = concept.get("title", "").strip() or "(untitled)"
     product = concept.get("product", "").strip() or concept.get("product_name", "").strip()
-    market = concept.get("market", "US").strip() or "US"
+    # Рынка может не быть вовсе — тогда его просто не будет на странице у Дины.
+    market = (concept.get("market") or "").strip()
     brand = concept.get("brand", "BelovedPets")
     about_bits = [b for b in [concept.get("hook", ""), concept.get("angle", "")] if b]
     about = " — ".join(about_bits)
@@ -1226,13 +1228,14 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
                 title=title, product_name=product, market=market,
                 drive_url=drive_url, listing_url=listing_url, end_date=end_date,
                 about=about, action_items=action_items, brand=brand,
-                body=concept.get("brief_text", ""),
+                body=concept.get("brief_text", ""), update_url=update_url,
             )
         scenes_table = _scenes_to_table(concept)
         return create_reel_brief(
             title=title, product_name=product, market=market,
             drive_url=drive_url, listing_url=listing_url, end_date=end_date,
             about=about, scenes=scenes_table, action_items=action_items, brand=brand,
+            update_url=update_url,
         )
     except ValueError as e:
         return {"error": str(e)}

@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -230,6 +231,51 @@ def _product_block(product_name: str, market: str, drive_url: str, listing_url: 
     return blocks
 
 
+def page_id_from(url_or_id: str) -> str:
+    """ID страницы из ссылки Notion (32 hex в хвосте) или уже готовый id."""
+    raw = (url_or_id or "").strip().split("?")[0].split("#")[0].rstrip("/")
+    # Берём ХВОСТ ссылки: в слаге («worms-inside-…») тоже попадаются буквы a-f, и поиск
+    # первого совпадения выдавал мусорный id, склеенный из слова и начала хеша.
+    m = re.search(r"([0-9a-fA-F]{32})$", raw.replace("-", ""))
+    if not m:
+        return raw
+    h = m.group(1).lower()
+    return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
+
+
+def replace_page(url_or_id: str, *, title: str, children: list, end_date: str | None = None,
+                 brand: str = "BelovedPets") -> dict:
+    """Перезаписать СУЩЕСТВУЮЩУЮ страницу Дины: заголовок, дата и всё содержимое.
+
+    Зачем: Дарья правит тему и ТЗ в контент-плане и жмёт «отправить заново». Раньше это
+    создавало ВТОРУЮ страницу, и Дина видела два ТЗ на один пост, не понимая, какое
+    актуальное. Теперь правка едет в ту же страницу — ссылка не меняется.
+
+    Старые блоки удаляются, новые дописываются. Статус (Not started / In progress / Done)
+    НЕ трогаем: его ведёт Дина, и сбрасывать её работу мы не имеем права.
+    """
+    pid = page_id_from(url_or_id)
+    props = _build_properties(title, end_date, brand)
+    props.pop("Status", None)          # статус — зона Дины, не перезаписываем
+    _request("PATCH", f"/pages/{pid}", {"properties": props})
+
+    cursor, old = None, []
+    while True:
+        path = f"/blocks/{pid}/children?page_size=100" + (f"&start_cursor={cursor}" if cursor else "")
+        resp = _request("GET", path)
+        old += [b["id"] for b in resp.get("results", [])]
+        if not resp.get("has_more"):
+            break
+        cursor = resp.get("next_cursor")
+    for bid in old:
+        _request("DELETE", f"/blocks/{bid}")
+
+    # Notion принимает не больше 100 блоков за запрос.
+    for i in range(0, len(children), 100):
+        _request("PATCH", f"/blocks/{pid}/children", {"children": children[i:i + 100]})
+    return {"id": pid, "url": f"https://www.notion.so/{pid.replace('-', '')}", "updated": True}
+
+
 def create_reel_brief(
     title: str,
     product_name: str,
@@ -242,8 +288,11 @@ def create_reel_brief(
     action_items: list[str] | None = None,
     documents_urls: list[str] | None = None,
     brand: str = "BelovedPets",
+    update_url: str = "",
 ) -> dict:
     """Создать страницу в базе Videos в формате рилса (с таблицей сценария).
+
+    update_url — если передан, содержимое уезжает В ЭТУ страницу вместо создания новой.
 
     Обязательные параметры (по правилу bp-notion-format):
         title — название страницы (lowercase, формат как у Дины)
@@ -255,8 +304,10 @@ def create_reel_brief(
     Возвращает dict с полями id, url.
     """
     # Ссылки и товар НЕ обязательны — Дина берёт материалы с общего Диска сама.
-    if market not in VALID_MARKETS:
-        market = "US"
+    # Рынок ТОЖЕ не обязателен: раньше пустое значение молча становилось «US», а
+    # дефолт в интерфейсе был «UK» — и Дина получала рынок, которого никто не выбирал.
+    # Нет рынка в ТЗ — строки про рынок на странице просто не будет.
+    market = market if market in VALID_MARKETS else ""
 
     scenes = scenes or []
     action_items = action_items or [""]
@@ -281,6 +332,10 @@ def create_reel_brief(
             "bookmark": {"url": url, "caption": []},
         })
 
+    if update_url:
+        return replace_page(update_url, title=title, children=children,
+                            end_date=end_date, brand=brand)
+
     payload = {
         "parent": {"database_id": DATABASE_ID},
         "properties": _build_properties(title, end_date, brand),
@@ -302,6 +357,7 @@ def create_static_brief(
     documents_urls: list[str] | None = None,
     brand: str = "BelovedPets",
     body: str = "",
+    update_url: str = "",
 ) -> dict:
     """Создать страницу для статичного поста (без таблицы сценария).
 
@@ -311,9 +367,8 @@ def create_static_brief(
 
     Обязательно: title + product_name + market + drive_url + listing_url.
     """
-    # Ссылки и товар НЕ обязательны — Дина берёт материалы с общего Диска сама.
-    if market not in VALID_MARKETS:
-        market = "US"
+    # Ссылки и товар НЕ обязательны, рынок тоже — см. комментарий в create_reel_brief.
+    market = market if market in VALID_MARKETS else ""
 
     action_items = action_items or [""]
     documents_urls = documents_urls or []
@@ -335,6 +390,10 @@ def create_static_brief(
             "type": "bookmark",
             "bookmark": {"url": url, "caption": []},
         })
+
+    if update_url:
+        return replace_page(update_url, title=title, children=children,
+                            end_date=end_date, brand=brand)
 
     payload = {
         "parent": {"database_id": DATABASE_ID},
