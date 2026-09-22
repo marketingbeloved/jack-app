@@ -562,7 +562,8 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
             dot = "💬 " if has else ""
             avatar = _avatar_html(_owner_of(it), owners)
             st.markdown(
-                f'<div class="cell-item" style="background:{c["bg"]};border-color:{c["border"]};color:{c["text"]};">'
+                f'<div class="cell-item" title="{html.escape(it["title"])}" '
+                f'style="background:{c["bg"]};border-color:{c["border"]};color:{c["text"]};">'
                 f'{avatar}'
                 f'<div class="cell-item-title">{dot}{html.escape(it["title"])}</div></div>',
                 unsafe_allow_html=True,
@@ -774,15 +775,27 @@ def _legend_pill(t: str, desc: str) -> str:
 
 _GRID_CSS = """
 <style>
-/* Календарь-таблица: каждая ячейка (st.container border) — клетка с границей, равная высота */
-div[data-testid="stVerticalBlockBorderWrapper"] {
+/* Календарь-таблица: клетка недели = st.container(border=True) внутри колонки.
+   ВАЖНО: в Streamlit 1.50 рамку рисует stVerticalBlock внутри stLayoutWrapper —
+   старого stVerticalBlockBorderWrapper в разметке больше нет, и правило по нему
+   молча не работало (клетки жили без нашей рамки и без min-height). */
+div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]
+  > div[data-testid="stLayoutWrapper"] > div[data-testid="stVerticalBlock"] {
     min-height: 165px;
     border: 1px solid #C9D4E3 !important;
     border-radius: 6px !important;
     background: #FFFFFF;
 }
 /* плотнее колонки, чтобы границы читались как сетка */
-div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
+div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; align-items: stretch !important; }
+/* Ровный ряд: все клетки недели одной высоты, какой бы длины ни была тема.
+   Без этого ячейки разъезжались по высоте — длинная подпись распирала свою клетку,
+   а соседняя пустая оставалась низкой, и сетка переставала читаться. У Tobydic
+   названия тем длиннее, поэтому там это било в глаза сильнее, чем у BelovedPets. */
+div[data-testid="stColumn"] { display: flex; }
+div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"] { width: 100%; height: 100%; }
+div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]
+  > div[data-testid="stLayoutWrapper"] { height: 100%; }
 .cal-date {
     font-size: 0.74rem;
     color: #4F5B72;
@@ -815,6 +828,9 @@ div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; }
     line-height: 1.3;
     font-weight: 600;
 }
+/* Подпись темы видна целиком: обрезать её нельзя — тема поста и есть то, что
+   читают в календаре. Ряд держит общую высоту (см. правило по stColumn выше),
+   поэтому длинное название растягивает всю неделю, а не ломает сетку. */
 .cell-item-title { font-weight: 700; margin-bottom: 2px; padding-right: 18px; }
 /* аватарка ответственного (Вика/Дина) — кружок в правом верхнем углу поста */
 .avatar {
