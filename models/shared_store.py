@@ -69,6 +69,7 @@ DEFAULT_TEAM = [
     {"name": "Dina", "role": "video"},
     {"name": "Vika", "role": "graphics"},
     {"name": "Tanya", "role": "TOBYDIC"},
+    {"name": "Maria", "role": "smm"},
 ]
 
 

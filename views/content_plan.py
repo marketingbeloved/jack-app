@@ -23,6 +23,7 @@ _OWNER_STYLE = {
     "dina":  {"name": "Дина",  "gen": "Дины",  "initial": "Д", "color": "#D9568C", "role": "video"},
     "tanya": {"name": "Таня",  "gen": "Тани",  "initial": "Т", "color": "#E0902B", "role": "TOBYDIC"},
     "darya": {"name": "Дарья", "gen": "Дарьи", "initial": "Д", "color": "#2BB58C", "role": "admin"},
+    "maria": {"name": "Мария", "gen": "Марии", "initial": "М", "color": "#7A5FC2", "role": "smm"},
 }
 _PALETTE = ["#7A5FC2", "#2BB58C", "#C2557A", "#4F9D69", "#B5642B", "#5566C2"]
 
@@ -786,6 +787,16 @@ div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]
     border-radius: 6px !important;
     background: #FFFFFF;
 }
+/* ОДИН ВИД У ВСЕХ. Streamlit в режиме wide растягивает 7 колонок на всю ширину
+   монитора: у Тани на широком экране клетки выходили плоскими и однострочными, у
+   Дарьи на ноутбуке — узкими, высокими и обрезанными справа. Ширина календаря
+   фиксирована, поэтому клетка везде одного размера; на узком экране появляется
+   горизонтальная прокрутка вместо обрезанного воскресенья. */
+div[data-testid="stMain"] { overflow-x: auto; }
+div[data-testid="stMainBlockContainer"] {
+    width: 1200px; max-width: 1200px; margin: 0 auto;
+}
+
 /* плотнее колонки, чтобы границы читались как сетка */
 div[data-testid="stHorizontalBlock"] { gap: 0.4rem !important; align-items: stretch !important; }
 /* Ровный ряд: все клетки недели одной высоты, какой бы длины ни была тема.
