@@ -100,6 +100,10 @@ def youtube_followers(channel_id_or_handle: str) -> int | None:
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             return None
+        # 2026 layout: metadataParts → {"text":{"content":"530 subscribers"}}
+        m = re.search(r'"content"\s*:\s*"([\d,.KMB ]+) subscribers?"', r.text)
+        if m:
+            return _parse_human(m.group(1))
         m = re.search(r'"subscriberCountText"[^}]*"simpleText"\s*:\s*"([\d,.KMB ]+) subscriber', r.text)
         if m:
             return _parse_human(m.group(1))
