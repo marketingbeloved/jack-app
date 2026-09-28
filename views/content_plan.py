@@ -273,8 +273,11 @@ PLANS_BY_BRAND: dict[str, dict[str, list[dict]]] = {
 _RU_MONTHS = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
               "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
 
-# С какого числа календарь открывает следующий месяц.
+# С какого числа следующий месяц появляется в списке периодов.
 NEXT_MONTH_OPENS_ON = 20
+# За сколько дней до конца месяца календарь начинает ОТКРЫВАТЬСЯ на следующем:
+# в последнюю неделю текущий месяц уже прожит, планируют следующий.
+SWITCH_DEFAULT_DAYS_LEFT = 7
 
 
 def month_label(year: int, month: int) -> str:
@@ -306,18 +309,35 @@ def months_available(today: date | None = None, plan: dict | None = None) -> dic
 
 
 def views_available(today: date | None = None, plan: dict | None = None) -> dict:
-    """Периоды для селектора «Период». Первым — текущий месяц (он и открывается),
-    затем совмещённый вид с будущим месяцем, затем будущий и прошлый по отдельности.
-    Прошлые месяцы из базы никуда не деваются: июнь-август лежат там же, просто вне
-    этого списка (бэкап на момент скрытия августа — cache/backups/plan-2026-09-07.json)."""
+    """Периоды для селектора «Период». Первый в списке открывается по умолчанию.
+
+    Открывается тот месяц, который сейчас планируют: следующий месяц появляется в
+    списке с 20-го числа, а открываться по умолчанию начинает в последнюю неделю
+    текущего (28 сентября работа идёт уже над октябрём, и открывать прожитый
+    сентябрь бессмысленно). Остальные месяцы остаются в списке — прошлый
+    тоже, чтобы можно было заглянуть в то, что уже вышло. Июнь-август лежат в базе
+    там же, просто вне этого списка (бэкап — cache/backups/plan-2026-09-07.json)."""
     today = today or date.today()
     cy, cm = today.year, today.month
     py, pm = _shift_month(cy, cm, -1)
     ny, nm = _shift_month(cy, cm, 1)
-    views = {month_label(cy, cm): [(cy, cm)]}
-    if month_label(ny, nm) in months_available(today, plan):
-        views[f"{_RU_MONTHS[cm - 1]} + {month_label(ny, nm)}"] = [(cy, cm), (ny, nm)]
-        views[month_label(ny, nm)] = [(ny, nm)]
+    cur, nxt = month_label(cy, cm), month_label(ny, nm)
+    both = f"{_RU_MONTHS[cm - 1]} + {nxt}"
+    # Сколько дней текущего месяца осталось (включая сегодня).
+    last_day = ((date(cy + 1, 1, 1) if cm == 12 else date(cy, cm + 1, 1)) - timedelta(days=1)).day
+    days_left = last_day - today.day + 1
+    views: dict = {}
+    if nxt in months_available(today, plan):
+        # В последнюю неделю месяца открываем сразу следующий — текущий уже прожит.
+        if days_left <= SWITCH_DEFAULT_DAYS_LEFT:
+            views[nxt] = [(ny, nm)]
+            views[cur] = [(cy, cm)]
+        else:
+            views[cur] = [(cy, cm)]
+            views[nxt] = [(ny, nm)]
+        views[both] = [(cy, cm), (ny, nm)]
+    else:
+        views[cur] = [(cy, cm)]
     views[month_label(py, pm)] = [(py, pm)]
     return views
 
@@ -669,8 +689,11 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
                 else '<div class="cell-empty">—</div>',
                 unsafe_allow_html=True,
             )
-            with st.popover("➕ Пост", use_container_width=True):
-                _new_post_form(d, key, brand, owners)
+            # Кнопка только там, где ещё можно планировать: прошедшие дни не трогаем,
+            # в сентябре 28-го числа «➕ Пост» на 7 сентября — мусор в глазах.
+            if d >= date.today():
+                with st.popover("➕ Пост", use_container_width=True):
+                    _new_post_form(d, key, brand, owners)
             return
 
         for it in items:
@@ -692,9 +715,6 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
             with st.popover("💬 ТЗ" if has else "➕ ТЗ", use_container_width=True):
                 _brief_editor(pid, it, entry, brand, market, key, owners)
 
-        # В занятый день тоже можно добавить ещё один пост — кнопка есть в каждой клетке.
-        with st.popover("➕ Пост", use_container_width=True):
-            _new_post_form(d, key, brand, owners)
 
 
 def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, day_key: str,
