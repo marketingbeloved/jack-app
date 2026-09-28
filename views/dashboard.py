@@ -56,7 +56,7 @@ def render():
         except Exception:
             soc = {}
         plat_labels = {"tiktok": "TikTok", "instagram": "Instagram", "youtube": "YouTube",
-                       "pinterest": "Pinterest"}
+                       "pinterest": "Pinterest", "facebook": "Facebook"}
         soc_cols = st.columns(len(plat_labels))
         for i, (plat, lab) in enumerate(plat_labels.items()):
             human = (soc.get(plat) or {}).get("human", "—")

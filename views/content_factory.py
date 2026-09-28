@@ -122,8 +122,8 @@ def render():
     brand_socials = fetch_socials(BRAND_HANDLES)
 
     st.markdown('<div class="section-label" style="margin-top:24px;">📊 Brand-wide social followers (live)</div>', unsafe_allow_html=True)
-    sc = st.columns(4)
-    for i, (platform, sdata) in enumerate([("tiktok", "TikTok"), ("instagram", "Instagram"), ("youtube", "YouTube"), ("pinterest", "Pinterest")]):
+    sc = st.columns(5)
+    for i, (platform, sdata) in enumerate([("tiktok", "TikTok"), ("instagram", "Instagram"), ("facebook", "Facebook"), ("youtube", "YouTube"), ("pinterest", "Pinterest")]):
         val = brand_socials.get(platform, {})
         sc[i].metric(sdata, val.get("human", "—") if val else "—")
 

@@ -166,6 +166,10 @@ def facebook_followers(page: str) -> int | None:
         r = requests.get(f"https://www.facebook.com/{page}/", headers=HEADERS, timeout=10)
         if r.status_code != 200:
             return None
+        # og:description ~ "Beloved Pets Brand. 9,217 followers · 11 talking about this."
+        m = re.search(r'og:description"\s+content="[^"]*?(\d[\d,.]*[KMB]?) followers', r.text)
+        if m:
+            return _parse_human(m.group(1))
         m = re.search(r'([\d,.KMB ]+) people like this', r.text)
         if m:
             return _parse_human(m.group(1))
