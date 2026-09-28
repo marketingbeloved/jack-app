@@ -36,7 +36,7 @@ PHONES = [
     },
     {
         "id": "pensilvania",
-        "name": "Pensilvania",
+        "name": "Pennsylvania / California",
         "geelark_id": "616136029354590511",
         "store": "Chewy",
         "cluster": "Reviewer",
@@ -159,8 +159,7 @@ def render():
             </div>
             """
 
-        st.markdown(
-            f"""
+        tree_html = f"""
             <div class="tree" style="background:{phone['card_bg']}; border-color:{phone['card_border']}; box-shadow: 0 8px 28px {phone['card_glow']}, 0 2px 6px rgba(6,11,23,0.05);">
                 <div class="tree-root">
                     <div class="phone-box" style="border-color:{phone['card_border']};">
@@ -183,9 +182,10 @@ def render():
                     {branches_html}
                 </div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            """
+        # Strip indentation: indented lines after a blank line render as a Markdown code block (stray "</div>")
+        tree_html = "".join(line.strip() for line in tree_html.splitlines())
+        st.markdown(tree_html, unsafe_allow_html=True)
 
     # ─── Integration roadmap ─────────────────────────────────────────────────
     st.markdown('<div class="section-label" style="margin-top:28px;">🔌 Integration status</div>', unsafe_allow_html=True)
