@@ -193,6 +193,20 @@ def _linkify(text: str) -> str:
     return re.sub(r"(?<!\()(https?://[^\s)\]]+)", r"[\1](\1)", text or "")
 
 
+# ─── Формат поста — что именно снимаем/рисуем ────────────────────────────────
+# Выбирается при заведении поста в ячейке и уходит Джеку в ТЗ: без формата он
+# угадывал «рилс или карусель» сам, и Вика с Диной получали не то, что ждали.
+POST_FORMATS = {
+    "": "— не указан",
+    "reel": "🎬 рилс",
+    "carousel": "🖼 карусель",
+    "animation": "✨ анимация",
+    "lifestyle": "📷 life pic (статичное фото)",
+    "blogger_photo": "🐶 фото от блогера",
+    "promo": "🏷 промо / акция",
+}
+
+
 # ─── Colour system — Дарины 3 категории + белый (некрашеный) ─────────────────
 # Цвет ставится ЯВНО на каждый пост (поле "type"), как в Google-таблице — не авто.
 TYPE_COLORS = {
@@ -340,13 +354,13 @@ def _save_plan(brand: str, plan: dict) -> None:
 
 
 def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str,
-                  owner: str = "") -> str:
+                  owner: str = "", fmt: str = "") -> str:
     import uuid
     plan = load_plan(brand)
     pid = f"{brand[:2].lower()}{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}"
     plan.setdefault(date_key, []).append(
         {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip(),
-         "owner": owner})
+         "owner": owner, "format": (fmt or "").strip()})
     _save_plan(brand, plan)
     return pid
 
@@ -363,7 +377,7 @@ def set_plan_owner(brand: str, date_key: str, pid: str, owner: str) -> None:
 
 def update_plan_post(brand: str, date_key: str, pid: str, *, title: str | None = None,
                      ptype: str | None = None, pillar: str | None = None,
-                     new_date: str | None = None) -> str:
+                     new_date: str | None = None, fmt: str | None = None) -> str:
     """Правка поста на месте: тема, цвет-категория, пиллар, перенос на другой день.
 
     Раньше этого не было вовсе — тему можно было только удалить и завести заново, теряя
@@ -381,6 +395,8 @@ def update_plan_post(brand: str, date_key: str, pid: str, *, title: str | None =
         target["type"] = ptype
     if pillar is not None:
         target["pillar"] = pillar.strip()
+    if fmt is not None:
+        target["format"] = fmt.strip()
 
     landed = date_key
     if new_date and new_date != date_key:
@@ -587,6 +603,55 @@ def render():
 WEEKDAY_RU = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
+def _new_post_form(d: date, day_key: str, brand: str, owners: dict) -> None:
+    """Завести пост прямо в клетке календаря: дата уже известна, остальное — в форме.
+
+    Раньше пост можно было добавить только одной формой внизу страницы, общей на весь
+    месяц: нужно было отдельно выбирать дату и мотать вниз. Здесь дата — это сама
+    клетка, а ТЗ и ссылку для исполнителя можно вписать сразу, не открывая пост заново.
+    """
+    from models import plan_briefs
+
+    st.markdown(f"**➕ Новый пост · {day_key} · {WEEKDAY_RU[d.weekday()]}**")
+    with st.form(f"newpost_{day_key}", clear_on_submit=False):
+        title = st.text_input("Тема поста", key=f"np_title_{day_key}",
+                              placeholder="напр. duck strips POV reel")
+        c1, c2 = st.columns(2)
+        fmt = c1.selectbox("Формат", list(POST_FORMATS.keys()),
+                           format_func=lambda f: POST_FORMATS[f], key=f"np_fmt_{day_key}")
+        _types = ["engaging", "selling", "viral", "neutral"]
+        ptype = c2.selectbox("Категория (цвет)", _types,
+                             format_func=lambda t: TYPE_COLORS[t]["label"] or "без категории",
+                             key=f"np_type_{day_key}")
+        c3, c4 = st.columns(2)
+        slugs = list(owners.keys())
+        owner = c3.selectbox("👤 Исполнитель", slugs,
+                             format_func=lambda x: _owner_meta(x, owners)["name"],
+                             key=f"np_owner_{day_key}") if slugs else ""
+        pillar = c4.text_input("Пиллар (необязательно)", key=f"np_pillar_{day_key}",
+                               placeholder="напр. Product Highlight")
+        link = st.text_input("🔗 Ссылка для исполнителя (фото от блогера / референс)",
+                             key=f"np_link_{day_key}",
+                             placeholder="ссылка на фото или референс — можно несколько")
+        brief = st.text_area("📝 ТЗ (если уже есть — впиши сразу)", height=120,
+                             key=f"np_brief_{day_key}",
+                             placeholder="можно оставить пустым: Джек напишет ТЗ в этой же ячейке")
+        submitted = st.form_submit_button("➕ Добавить пост", type="primary",
+                                          use_container_width=True)
+    if submitted:
+        if not title.strip():
+            st.warning("Впиши тему поста.")
+            return
+        pid = add_plan_post(brand, day_key, title, ptype, pillar, owner or "", fmt=fmt)
+        if brief.strip() or link.strip():
+            plan_briefs.save(pid, brief, title=title.strip(), pillar=pillar.strip(),
+                             for_who=owner or "", updated=_now(), link=link)
+        st.success(f"✓ {day_key} — {title.strip()}. Видно всей команде.")
+        st.rerun()
+    st.caption("После добавления в этой же клетке появится кнопка **💬 ТЗ** — там Джек "
+               "напишет ТЗ и оттуда же уходит кнопка **📤 Написать ТЗ Дине в Notion**.")
+
+
 def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str, market: str,
                  owners: dict) -> None:
     """Render one calendar day as a bordered table cell: date header + theme chip(s) + ➕ ТЗ."""
@@ -604,6 +669,8 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
                 else '<div class="cell-empty">—</div>',
                 unsafe_allow_html=True,
             )
+            with st.popover("➕ Пост", use_container_width=True):
+                _new_post_form(d, key, brand, owners)
             return
 
         for it in items:
@@ -613,15 +680,21 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
             has = bool(entry.get("text"))
             dot = "💬 " if has else ""
             avatar = _avatar_html(_owner_of(it), owners)
+            fmt_label = POST_FORMATS.get(it.get("format", ""), "") if it.get("format") else ""
+            meta = f'<div class="cell-item-meta">{html.escape(fmt_label)}</div>' if fmt_label else ""
             st.markdown(
                 f'<div class="cell-item" title="{html.escape(it["title"])}" '
                 f'style="background:{c["bg"]};border-color:{c["border"]};color:{c["text"]};">'
                 f'{avatar}'
-                f'<div class="cell-item-title">{dot}{html.escape(it["title"])}</div></div>',
+                f'<div class="cell-item-title">{dot}{html.escape(it["title"])}</div>{meta}</div>',
                 unsafe_allow_html=True,
             )
             with st.popover("💬 ТЗ" if has else "➕ ТЗ", use_container_width=True):
                 _brief_editor(pid, it, entry, brand, market, key, owners)
+
+        # В занятый день тоже можно добавить ещё один пост — кнопка есть в каждой клетке.
+        with st.popover("➕ Пост", use_container_width=True):
+            _new_post_form(d, key, brand, owners)
 
 
 def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, day_key: str,
@@ -664,6 +737,11 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
             format_func=lambda t: TYPE_COLORS[t]["label"] or "без категории",
             key=f"ety_{pid}")
         e_pillar = ec2.text_input("Пиллар", value=item.get("pillar", ""), key=f"ep_{pid}")
+        _fmts = list(POST_FORMATS.keys())
+        _cur_fmt = item.get("format", "")
+        e_fmt = st.selectbox("Формат", _fmts,
+                             index=_fmts.index(_cur_fmt) if _cur_fmt in _fmts else 0,
+                             format_func=lambda f: POST_FORMATS[f], key=f"efm_{pid}")
         try:
             _d, _m = day_key.split(".")
             _cur_date = date(date.today().year, int(_m), int(_d))
@@ -672,7 +750,8 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         e_date = st.date_input("Дата", value=_cur_date, key=f"ed_{pid}")
         if st.button("💾 Сохранить пост", key=f"ep_save_{pid}", use_container_width=True):
             landed = update_plan_post(brand, day_key, pid, title=e_title, ptype=e_type,
-                                      pillar=e_pillar, new_date=e_date.strftime("%d.%m"))
+                                      pillar=e_pillar, new_date=e_date.strftime("%d.%m"),
+                                      fmt=e_fmt)
             # Заголовок ТЗ держим в согласии с темой, иначе в списке ТЗ останется старое имя.
             if entry.get("text"):
                 plan_briefs.save(pid, entry["text"], title=e_title.strip(), pillar=e_pillar.strip(),
@@ -704,9 +783,12 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     if st.button(f"🐾 Джек, напиши ТЗ для {who_gen}", key=f"gen_{pid}",
                  use_container_width=True, type="primary"):
         from models.jack_engine import brief_for_vika
+        # Формат поста (рилс / карусель / life pic …) — часть задания, а не догадка Джека.
+        _fmt_now = POST_FORMATS.get(item.get("format", ""), "") if item.get("format") else ""
+        _extra = (f"Формат поста: {_fmt_now}. {wish}".strip() if _fmt_now else wish)
         with st.spinner(f"🐾 Джек пишет ТЗ для {who_gen}…"):
             txt = brief_for_vika(title=item["title"], pillar=item["pillar"],
-                                 brand=brand, market=market, extra=wish, link=link,
+                                 brand=brand, market=market, extra=_extra, link=link,
                                  for_name=who_name, for_role=who_role)
         if txt.startswith("⚠️"):
             st.error(txt)
