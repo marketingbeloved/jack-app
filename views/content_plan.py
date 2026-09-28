@@ -250,20 +250,62 @@ PLANS_BY_BRAND: dict[str, dict[str, list[dict]]] = {
     "Tobydic": _PLAN_TOBYDIC,
 }
 
-# Месяцы, доступные в календаре (label → (год, месяц)).
-MONTHS = {"Июнь 2026": (2026, 6), "Июль 2026": (2026, 7), "Август 2026": (2026, 8),
-          "Сентябрь 2026": (2026, 9)}
+# ─── Какие месяцы показывает календарь ───────────────────────────────────────
+# Раньше список месяцев был вписан в код руками, и каждый новый месяц приходилось
+# просить добавить: 28 сентября нельзя было завести пост на 1 октября, потому что
+# октября просто не существовало в селекторе. Теперь месяцы считаются от сегодняшней
+# даты, и следующий месяц открывается сам — с 20-го числа (или раньше, если на него
+# уже завели посты). Просить больше не нужно ни в октябре, ни в декабре.
+_RU_MONTHS = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
+              "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
 
-# Периоды для селектора: можно показать несколько месяцев сразу (label → список (год, месяц)).
-# Июнь, июль и август убраны из календаря (прошли) — их данные в базе СОХРАНЕНЫ, просто не
-# показываются; бэкап на момент скрытия августа — cache/backups/plan-2026-09-07.json.
-# Октябрь пустой: постов в базе нет, ячейки отрисуются прочерками — заполняется через
-# «➕ Добавить пост» или генератором месяца.
-VIEWS = {
-    "Сентябрь 2026":            [(2026, 9)],
-    "Сентябрь + Октябрь 2026":  [(2026, 9), (2026, 10)],
-    "Октябрь 2026":             [(2026, 10)],
-}
+# С какого числа календарь открывает следующий месяц.
+NEXT_MONTH_OPENS_ON = 20
+
+
+def month_label(year: int, month: int) -> str:
+    """«Октябрь 2026» — подпись месяца в селекторе и в разделителе календаря."""
+    return f"{_RU_MONTHS[month - 1]} {year}"
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    i = year * 12 + (month - 1) + delta
+    return i // 12, i % 12 + 1
+
+
+def _plan_has_month(plan: dict | None, month: int) -> bool:
+    """Есть ли в плане посты этого месяца. Даты хранятся как «ДД.ММ» без года, но
+    горизонт календаря — соседние месяцы, поэтому месяца достаточно."""
+    return bool(plan) and any(k.endswith(f".{month:02d}") for k in plan)
+
+
+def months_available(today: date | None = None, plan: dict | None = None) -> dict:
+    """Месяцы календаря по порядку: прошлый, текущий и — когда открыт — следующий."""
+    today = today or date.today()
+    py, pm = _shift_month(today.year, today.month, -1)
+    ny, nm = _shift_month(today.year, today.month, 1)
+    out = {month_label(py, pm): (py, pm),
+           month_label(today.year, today.month): (today.year, today.month)}
+    if today.day >= NEXT_MONTH_OPENS_ON or _plan_has_month(plan, nm):
+        out[month_label(ny, nm)] = (ny, nm)
+    return out
+
+
+def views_available(today: date | None = None, plan: dict | None = None) -> dict:
+    """Периоды для селектора «Период». Первым — текущий месяц (он и открывается),
+    затем совмещённый вид с будущим месяцем, затем будущий и прошлый по отдельности.
+    Прошлые месяцы из базы никуда не деваются: июнь-август лежат там же, просто вне
+    этого списка (бэкап на момент скрытия августа — cache/backups/plan-2026-09-07.json)."""
+    today = today or date.today()
+    cy, cm = today.year, today.month
+    py, pm = _shift_month(cy, cm, -1)
+    ny, nm = _shift_month(cy, cm, 1)
+    views = {month_label(cy, cm): [(cy, cm)]}
+    if month_label(ny, nm) in months_available(today, plan):
+        views[f"{_RU_MONTHS[cm - 1]} + {month_label(ny, nm)}"] = [(cy, cm), (ny, nm)]
+        views[month_label(ny, nm)] = [(ny, nm)]
+    views[month_label(py, pm)] = [(py, pm)]
+    return views
 
 
 # ─── Plan store (общая база) — даты/темы синхронятся у всех 4, правятся в UI ──
@@ -394,12 +436,22 @@ def _render_calendar(year: int, month: int, plan: dict, briefs: dict, brand: str
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
 
-    view_label = st.selectbox("Период", list(VIEWS.keys()), index=0, key="plan_view")
-    view_months = VIEWS[view_label]
-    fy, fm = view_months[0]
-    ly, lm = view_months[-1]
+    # План читаем ДО селектора: если посты на следующий месяц уже заведены, месяц
+    # показываем, не дожидаясь 20-го числа.
+    plan = load_plan(brand)
+    views = views_available(plan=plan)
+
+    view_label = st.selectbox("Период", list(views.keys()), index=0, key="plan_view")
+    view_months = views[view_label]
+
+    # Завести пост можно в любой открытый месяц, а не только в выбранный период —
+    # иначе, стоя в сентябре, нельзя было выбрать 1 октября.
+    all_months = sorted(set(list(months_available(plan=plan).values()) + view_months))
+    fy, fm = all_months[0]
+    ly, lm = all_months[-1]
     add_min = date(fy, fm, 1)
     add_max = (date(ly + 1, 1, 1) if lm == 12 else date(ly, lm + 1, 1)) - timedelta(days=1)
+    add_default = max(add_min, min(add_max, date.today()))
 
     st.markdown(f"# 📅 Контент-план · {brand} · {view_label}")
     st.caption("Календарь по неделям · цвет = категория · ➕ ТЗ в ячейке = Джек пишет ТЗ Вике. "
@@ -425,7 +477,6 @@ def render():
         st.session_state["_briefs_synced"] = True
     briefs = plan_briefs.load_all()
 
-    plan = load_plan(brand)
     if not plan:
         st.info(f"План **{brand}** ещё пустой. Добавь даты и темы внизу — форма **«➕ Добавить пост»**. "
                 f"Появятся ячейки, и их сразу увидит вся команда (без зипов и пересылок).")
@@ -447,7 +498,7 @@ def render():
     # ─── Календарь — выбранный период (один или несколько месяцев) ────────────
     for vy, vm in view_months:
         if len(view_months) > 1:
-            mlabel = next((k for k, v in MONTHS.items() if v == (vy, vm)), f"{vy}-{vm:02d}")
+            mlabel = month_label(vy, vm)
             st.markdown(f'<div class="month-divider">📅 {mlabel}</div>', unsafe_allow_html=True)
         _render_calendar(vy, vm, plan, briefs, brand, market, owners)
 
@@ -460,7 +511,7 @@ def render():
         st.caption("Добавляешь один раз — видят все. Без зипов и пересылок.")
         with st.form("add_plan_post", clear_on_submit=True):
             ac1, ac2 = st.columns(2)
-            add_date = ac1.date_input("Дата", value=add_min,
+            add_date = ac1.date_input("Дата", value=add_default,
                                       min_value=add_min, max_value=add_max,
                                       key="add_plan_date")
             add_type = ac2.selectbox("Тип (цвет ячейки)", ["engaging", "selling", "viral", "neutral"],

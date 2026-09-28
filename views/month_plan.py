@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from views.content_plan import MONTHS, TYPE_COLORS, _team_owners
+from views.content_plan import TYPE_COLORS, _team_owners, months_available
 
 _FMT_RU = {"reel": "🎬 рилс", "carousel": "🖼 карусель", "animation": "✨ анимация",
            "lifestyle": "📷 life pic", "blogger_photo": "🐶 фото блогера", "promo": "🏷 промо"}
@@ -56,9 +56,12 @@ def render() -> None:
             st.caption(f"В базе {len(have)} постов с цифрами. Обновится у всей команды.")
 
     gc1, gc2 = st.columns([1, 1])
-    month_label = gc1.selectbox("Месяц, который писать", list(MONTHS.keys()),
-                                index=len(MONTHS) - 1, key="gen_month_sel")
-    gy, gm = MONTHS[month_label]
+    # Месяцы считаются от сегодняшней даты (прошлый, текущий, следующий) — список
+    # больше не вписан в код, поэтому новый месяц не нужно добавлять руками.
+    months = months_available()
+    month_label = gc1.selectbox("Месяц, который писать", list(months.keys()),
+                                index=len(months) - 1, key="gen_month_sel")
+    gy, gm = months[month_label]
     weeks = plan_generator.month_skeleton(gy, gm, photo_owner=photo_owner,
                                           video_owner=video_owner)
     gc2.metric("Слотов в месяце", sum(len(w) for w in weeks),
