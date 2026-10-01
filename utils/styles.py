@@ -291,6 +291,18 @@ code, pre {
 [data-testid="stSidebar"] * {
     color: rgba(255, 255, 255, 0.94) !important;
 }
+/* ...но НЕ внутри полей ввода: у них собственный белый фон, и правило выше делало
+   текст белым по белому. Так пропадало выбранное значение в «Brand» — поле выглядело
+   пустым, хотя бренд был выбран (видно только в новых версиях Streamlit, где значение
+   селекта рисуется обычным <input>). */
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea,
+[data-testid="stSidebar"] [role="combobox"],
+[data-testid="stSidebar"] [role="combobox"] *,
+[data-testid="stSidebar"] [data-baseweb="select"] * {
+    color: #1B2A3D !important;
+    -webkit-text-fill-color: #1B2A3D !important;
+}
 [data-testid="stSidebar"] h2 {
     color: #FFFFFF !important;
     font-size: 1.55rem !important;

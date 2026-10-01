@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from views.content_plan import TYPE_COLORS, _team_owners, months_available
+from datetime import date
+
+from views.content_plan import (TYPE_COLORS, _shift_month, _team_owners,
+                                months_available)
+from views.content_plan import month_label as month_label_for
 
 _FMT_RU = {"reel": "🎬 рилс", "carousel": "🖼 карусель", "animation": "✨ анимация",
            "lifestyle": "📷 life pic", "blogger_photo": "🐶 фото блогера", "promo": "🏷 промо"}
@@ -56,11 +60,15 @@ def render() -> None:
             st.caption(f"В базе {len(have)} постов с цифрами. Обновится у всей команды.")
 
     gc1, gc2 = st.columns([1, 1])
-    # Месяцы считаются от сегодняшней даты (прошлый, текущий, следующий) — список
-    # больше не вписан в код, поэтому новый месяц не нужно добавлять руками.
+    # Месяцы считаются от сегодняшней даты (прошлый, текущий и горизонт вперёд) —
+    # список больше не вписан в код, новый месяц не нужно добавлять руками.
+    # По умолчанию предлагаем следующий месяц: текущий обычно уже расписан.
     months = months_available()
-    month_label = gc1.selectbox("Месяц, который писать", list(months.keys()),
-                                index=len(months) - 1, key="gen_month_sel")
+    _labels = list(months.keys())
+    _next = month_label_for(*_shift_month(date.today().year, date.today().month, 1))
+    month_label = gc1.selectbox("Месяц, который писать", _labels,
+                                index=_labels.index(_next) if _next in _labels else 0,
+                                key="gen_month_sel")
     gy, gm = months[month_label]
     weeks = plan_generator.month_skeleton(gy, gm, photo_owner=photo_owner,
                                           video_owner=video_owner)

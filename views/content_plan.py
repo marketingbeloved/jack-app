@@ -268,13 +268,13 @@ PLANS_BY_BRAND: dict[str, dict[str, list[dict]]] = {
 # Раньше список месяцев был вписан в код руками, и каждый новый месяц приходилось
 # просить добавить: 28 сентября нельзя было завести пост на 1 октября, потому что
 # октября просто не существовало в селекторе. Теперь месяцы считаются от сегодняшней
-# даты, и следующий месяц открывается сам — с 20-го числа (или раньше, если на него
-# уже завели посты). Просить больше не нужно ни в октябре, ни в декабре.
+# даты и уходят вперёд на горизонт планирования — 1 октября в списке сразу есть
+# ноябрь и декабрь. Просить добавить месяц больше не нужно никогда.
 _RU_MONTHS = ("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
               "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
 
-# С какого числа следующий месяц появляется в списке периодов.
-NEXT_MONTH_OPENS_ON = 20
+# На сколько месяцев вперёд открыт календарь (горизонт планирования).
+PLAN_AHEAD_MONTHS = 3
 # За сколько дней до конца месяца календарь начинает ОТКРЫВАТЬСЯ на следующем:
 # в последнюю неделю текущий месяц уже прожит, планируют следующий.
 SWITCH_DEFAULT_DAYS_LEFT = 7
@@ -290,55 +290,60 @@ def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
     return i // 12, i % 12 + 1
 
 
-def _plan_has_month(plan: dict | None, month: int) -> bool:
-    """Есть ли в плане посты этого месяца. Даты хранятся как «ДД.ММ» без года, но
-    горизонт календаря — соседние месяцы, поэтому месяца достаточно."""
-    return bool(plan) and any(k.endswith(f".{month:02d}") for k in plan)
-
-
 def months_available(today: date | None = None, plan: dict | None = None) -> dict:
-    """Месяцы календаря по порядку: прошлый, текущий и — когда открыт — следующий."""
+    """Месяцы календаря по порядку: прошлый, текущий и PLAN_AHEAD_MONTHS вперёд.
+
+    `plan` больше ни на что не влияет — месяцы вперёд открыты всегда; параметр
+    оставлен, чтобы не ломать вызовы.
+    """
     today = today or date.today()
-    py, pm = _shift_month(today.year, today.month, -1)
-    ny, nm = _shift_month(today.year, today.month, 1)
-    out = {month_label(py, pm): (py, pm),
-           month_label(today.year, today.month): (today.year, today.month)}
-    if today.day >= NEXT_MONTH_OPENS_ON or _plan_has_month(plan, nm):
-        out[month_label(ny, nm)] = (ny, nm)
+    out: dict = {}
+    for delta in range(-1, PLAN_AHEAD_MONTHS + 1):
+        y, m = _shift_month(today.year, today.month, delta)
+        out[month_label(y, m)] = (y, m)
     return out
+
+
+def default_month(today: date | None = None) -> tuple[int, int]:
+    """Месяц, который открывается сам: в последнюю неделю — уже следующий."""
+    today = today or date.today()
+    cy, cm = today.year, today.month
+    last_day = ((date(cy + 1, 1, 1) if cm == 12 else date(cy, cm + 1, 1)) - timedelta(days=1)).day
+    if last_day - today.day + 1 <= SWITCH_DEFAULT_DAYS_LEFT:
+        return _shift_month(cy, cm, 1)
+    return cy, cm
 
 
 def views_available(today: date | None = None, plan: dict | None = None) -> dict:
     """Периоды для селектора «Период». Первый в списке открывается по умолчанию.
 
-    Открывается тот месяц, который сейчас планируют: следующий месяц появляется в
-    списке с 20-го числа, а открываться по умолчанию начинает в последнюю неделю
-    текущего (28 сентября работа идёт уже над октябрём, и открывать прожитый
-    сентябрь бессмысленно). Остальные месяцы остаются в списке — прошлый
-    тоже, чтобы можно было заглянуть в то, что уже вышло. Июнь-август лежат в базе
-    там же, просто вне этого списка (бэкап — cache/backups/plan-2026-09-07.json)."""
+    Открывается тот месяц, который сейчас планируют: текущий, а в последнюю неделю —
+    уже следующий (в конце сентября работа идёт над октябрём, открывать прожитый
+    сентябрь бессмысленно). Дальше по списку — остальные месяцы горизонта вперёд
+    (1 октября это ноябрь и декабрь), совмещённый вид двух соседних месяцев и
+    прошлый месяц — заглянуть в то, что уже вышло. Июнь-август лежат в базе там же,
+    просто вне этого списка (бэкап — cache/backups/plan-2026-09-07.json).
+    """
     today = today or date.today()
     cy, cm = today.year, today.month
+    dy, dm = default_month(today)
     py, pm = _shift_month(cy, cm, -1)
-    ny, nm = _shift_month(cy, cm, 1)
-    cur, nxt = month_label(cy, cm), month_label(ny, nm)
-    both = f"{_RU_MONTHS[cm - 1]} + {nxt}"
-    # Сколько дней текущего месяца осталось (включая сегодня).
-    last_day = ((date(cy + 1, 1, 1) if cm == 12 else date(cy, cm + 1, 1)) - timedelta(days=1)).day
-    days_left = last_day - today.day + 1
-    views: dict = {}
-    if nxt in months_available(today, plan):
-        # В последнюю неделю месяца открываем сразу следующий — текущий уже прожит.
-        if days_left <= SWITCH_DEFAULT_DAYS_LEFT:
-            views[nxt] = [(ny, nm)]
-            views[cur] = [(cy, cm)]
-        else:
-            views[cur] = [(cy, cm)]
-            views[nxt] = [(ny, nm)]
-        views[both] = [(cy, cm), (ny, nm)]
-    else:
-        views[cur] = [(cy, cm)]
-    views[month_label(py, pm)] = [(py, pm)]
+    ny, nm = _shift_month(dy, dm, 1)
+
+    months = months_available(today, plan)
+    prev_label = month_label(py, pm)
+    default_label = month_label(dy, dm)
+
+    views: dict = {default_label: [months[default_label]]}
+    # дальше — хронологически все остальные месяцы горизонта, прошлый в самый конец
+    for label, (y, m) in months.items():
+        if label in (default_label, prev_label):
+            continue
+        views[label] = [(y, m)]
+    # совмещённый вид: открытый месяц + следующий за ним (так удобно переносить посты)
+    if month_label(ny, nm) in months:
+        views[f"{_RU_MONTHS[dm - 1]} + {month_label(ny, nm)}"] = [(dy, dm), (ny, nm)]
+    views[prev_label] = [months[prev_label]]
     return views
 
 
