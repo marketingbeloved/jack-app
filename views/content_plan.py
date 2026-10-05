@@ -19,11 +19,11 @@ _URL_RE = re.compile(r"https?://[^\s)\]]+")
 _AVATARS_DIR = Path(__file__).resolve().parent.parent / "assets" / "avatars"
 # gen — имя в родительном падеже («для Вики», «от Дины»); role — для какого ТЗ (graphics/video).
 _OWNER_STYLE = {
-    "vika":  {"name": "Вика",  "gen": "Вики",  "initial": "В", "color": "#3D7EDB", "role": "graphics"},
-    "dina":  {"name": "Дина",  "gen": "Дины",  "initial": "Д", "color": "#D9568C", "role": "video"},
-    "tanya": {"name": "Таня",  "gen": "Тани",  "initial": "Т", "color": "#E0902B", "role": "TOBYDIC"},
-    "darya": {"name": "Дарья", "gen": "Дарьи", "initial": "Д", "color": "#2BB58C", "role": "admin"},
-    "maria": {"name": "Мария", "gen": "Марии", "initial": "М", "color": "#7A5FC2", "role": "smm"},
+    "vika":  {"name": "Вика",  "gen": "Вики",  "dat": "Вике",  "initial": "В", "color": "#3D7EDB", "role": "graphics"},
+    "dina":  {"name": "Дина",  "gen": "Дины",  "dat": "Дине",  "initial": "Д", "color": "#D9568C", "role": "video"},
+    "tanya": {"name": "Таня",  "gen": "Тани",  "dat": "Тане",  "initial": "Т", "color": "#E0902B", "role": "TOBYDIC"},
+    "darya": {"name": "Дарья", "gen": "Дарьи", "dat": "Дарье", "initial": "Д", "color": "#2BB58C", "role": "admin"},
+    "maria": {"name": "Мария", "gen": "Марии", "dat": "Марии", "initial": "М", "color": "#7A5FC2", "role": "smm"},
 }
 _PALETTE = ["#7A5FC2", "#2BB58C", "#C2557A", "#4F9D69", "#B5642B", "#5566C2"]
 
@@ -56,6 +56,7 @@ def _team_owners() -> dict:
             base["role"] = str(m["role"]).strip()
         base.setdefault("role", "")
         base.setdefault("gen", base["name"])
+        base.setdefault("dat", base["name"])
         owners[s] = base
     return owners
 
@@ -67,7 +68,8 @@ def _owner_meta(slug: str, owners: dict | None = None) -> dict:
     if slug in _OWNER_STYLE:
         return dict(_OWNER_STYLE[slug])
     return {"name": slug.title() or "?", "gen": slug.title() or "?",
-            "initial": (slug[:1].upper() or "?"), "color": "#8A93A3", "role": ""}
+            "dat": slug.title() or "?", "initial": (slug[:1].upper() or "?"),
+            "color": "#8A93A3", "role": ""}
 
 
 def _owner_of(item: dict) -> str:
@@ -855,11 +857,16 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     if entry.get("updated"):
         st.caption(f"обновлено {entry['updated']}")
 
-    # ─── Отправить ТЗ Дине в Notion — ТОЛЬКО вручную, после проверки Дарьей ──────
-    if saved_txt:
-        st.markdown("---")
-        # Ссылка на Notion хранится вместе с ТЗ, а не в session_state: иначе после
-        # перезагрузки страницы кнопка снова выглядит «не нажатой» и Дина получает дубль.
+    # ─── Отправить ТЗ — ТОЛЬКО вручную, после проверки Дарьей ───────────────────
+    # Адрес зависит от исполнителя, а не от кнопки: видео-ТЗ Дины уезжает в её базу
+    # Videos в Notion (там формат со сценами), работа остальных живёт в ClickUp.
+    # Раньше кнопка всегда называлась «Написать ТЗ Дине в Notion» — и ТЗ для Вики
+    # уходило в Динину видео-базу, то есть не туда, куда нужно. Отправку в Notion при
+    # этом не отнимаем ни у кого: пока ClickUp не подключён, это единственный путь.
+    who_dat = _meta.get("dat") or who_name
+    to_notion = "video" in who_role or sel == "dina"
+
+    def _notion_block() -> None:
         sent = entry.get("notion_url") or st.session_state.get(f"notion_ok_{pid}")
         if sent:
             st.success(f"📤 Уже в Notion у Дины: {sent}")
@@ -871,7 +878,9 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
                                       "Ссылка не поменяется, статус Дины не сбросится.")
         else:
             resend = False
-        label = "📤 Обновить ТЗ у Дины" if sent else "📤 Написать ТЗ Дине в Notion"
+        label = ("📤 Обновить ТЗ у Дины" if sent
+                 else ("📤 Написать ТЗ Дине в Notion" if to_notion
+                       else "📤 Всё равно отправить в Notion (база Дины)"))
         if st.button(label, key=f"notion_{pid}", use_container_width=True,
                      disabled=bool(sent) and not resend,
                      help="Уходит только сейчас, по этой кнопке. Автоматически — никогда."):
@@ -890,6 +899,49 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
                 if res.get("note"):
                     st.session_state[f"notion_note_{pid}"] = res["note"]
                 st.rerun()
+
+    if saved_txt and to_notion:
+        st.markdown("---")
+        _notion_block()
+
+    if saved_txt and not to_notion:
+        st.markdown("---")
+        from models import plan_to_clickup
+        sent_cu = entry.get("clickup_url") or st.session_state.get(f"clickup_ok_{pid}")
+        if sent_cu:
+            st.success(f"📤 Задача у {who_gen} в ClickUp: {sent_cu}")
+            resend_cu = st.checkbox("обновить задачу (перезапишет ту же)",
+                                    key=f"clickup_force_{pid}",
+                                    help="Правки темы и ТЗ уедут в ту же задачу, новая не создастся.")
+        else:
+            resend_cu = False
+        ready, why = plan_to_clickup.configured()
+        label = (f"📤 Обновить задачу у {who_gen}" if sent_cu
+                 else f"📤 Поставить задачу {who_dat} в ClickUp")
+        if st.button(label, key=f"clickup_{pid}", use_container_width=True,
+                     disabled=(bool(sent_cu) and not resend_cu) or not ready,
+                     help="Уходит только сейчас, по этой кнопке. Автоматически — никогда."):
+            with st.spinner("Ставлю задачу в ClickUp…"):
+                res = plan_to_clickup.push_task(item, entry, brand=brand, date_key=day_key,
+                                                for_name=who_name, force=resend_cu)
+            if res.get("error"):
+                st.error(res["error"])
+            elif res.get("skipped"):
+                st.info(res["skipped"])
+            else:
+                url = res.get("url", "")
+                st.session_state[f"clickup_ok_{pid}"] = url
+                plan_briefs.save(pid, saved_txt, title=item["title"], pillar=item["pillar"],
+                                 for_who=sel, updated=_now(), link=link,
+                                 wish=entry.get("wish", ""), clickup_url=url)
+                st.rerun()
+        if not ready:
+            st.caption(f"⚠️ {why}")
+        # Старый путь остаётся рабочим, пока ClickUp не подключён.
+        with st.expander("…или отправить в Notion, как раньше"):
+            st.caption("Это база видео-ТЗ Дины — для графики она не предназначена, "
+                       "но путь оставлен, чтобы ничего не встало.")
+            _notion_block()
 
     b1, b2 = st.columns(2)
     if b1.button("💾 Сохранить", key=f"save_{pid}", use_container_width=True):

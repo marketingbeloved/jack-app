@@ -87,7 +87,7 @@ def ensure_synced() -> int:
 
 def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
          for_who: str = "vika", updated: str = "", link: str = "", wish: str = "",
-         notion_url: str | None = None) -> None:
+         notion_url: str | None = None, clickup_url: str | None = None) -> None:
     text = (text or "").strip()
     link = (link or "").strip()
     entry = {"text": text, "link": link, "title": title,
@@ -109,6 +109,20 @@ def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
             prev = load_all().get(post_id, {}).get("notion_url", "")
             if prev:
                 entry["notion_url"] = prev
+    # Ссылка на задачу в ClickUp — ровно та же логика, что и с Notion: по ней ловим
+    # повторную отправку, чтобы у Вики не множились одинаковые задачи.
+    if clickup_url is None:
+        prev = load_all().get(post_id, {}).get("clickup_url", "")
+        if prev:
+            entry["clickup_url"] = prev
+    elif clickup_url:
+        if re.match(r"https://(www\.)?app\.clickup\.com/", clickup_url):
+            entry["clickup_url"] = clickup_url
+        else:
+            prev = load_all().get(post_id, {}).get("clickup_url", "")
+            if prev:
+                entry["clickup_url"] = prev
+
     keep = entry if (text or link) else None
     sb = _supabase()
     if sb:
