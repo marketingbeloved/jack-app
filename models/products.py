@@ -17,13 +17,58 @@ from pathlib import Path
 from functools import lru_cache
 
 PRODUCTS_JSON = Path("/Users/macbook/Databases/02 Content Factory/code/assets/products/products.json")
+if not PRODUCTS_JSON.exists():
+    # На чужом маке Content Factory нет — копия каталога лежит в brand_data/ (gitignored)
+    PRODUCTS_JSON = Path(__file__).resolve().parent.parent / "brand_data" / "products.json"
+
+
+# Ключ каталога в общей базе. brand_data/ в git не уходит (репо публичный), поэтому на
+# Streamlit Cloud файла нет — и Джек видел пустую «библиотеку» и выдумывал товары.
+# Каталог заливается в Supabase скриптом scripts/upload_products.py.
+SHARED_KEY = "products_belovedpets"
 
 
 @lru_cache(maxsize=1)
 def _load():
-    if not PRODUCTS_JSON.exists():
-        return {"products": [], "global_compliance": {}, "category_knowledge_base": {}}
-    return json.loads(PRODUCTS_JSON.read_text(encoding="utf-8"))
+    if PRODUCTS_JSON.exists():
+        return json.loads(PRODUCTS_JSON.read_text(encoding="utf-8"))
+    try:
+        from models import shared_store
+        data = shared_store.get_json(SHARED_KEY, None)
+        if isinstance(data, dict) and data.get("products"):
+            return data
+    except Exception:
+        pass
+    return {"products": [], "global_compliance": {}, "category_knowledge_base": {}}
+
+
+# TOBYDIC — 7 SKU, все herbal liquid drops 2 oz. Источник: Контент-завод,
+# knowledge/products/tobydic.md (имена — те, под которыми товар идёт в контенте).
+TOBYDIC_PRODUCTS = [
+    {"id": "TURI2OZ", "title": "TOBYDIC Urinary Tract Support", "category": "supplement",
+     "description_short": "Herbal drops: cranberry, D-mannose — urinary tract & bladder support"},
+    {"id": "TYEAST2OZ", "title": "TOBYDIC Yeast & Skin Support", "category": "supplement",
+     "description_short": "Herbal drops with probiotics — skin & coat care, healthy immune function"},
+    {"id": "TDEWO2OZ", "title": "TOBYDIC DEWO Herbal Intestinal Cleanse", "category": "supplement",
+     "description_short": "Herbal drops: pumpkin seed, wormwood, black walnut — healthy intestinal function"},
+    {"id": "TDEWOP2OZ", "title": "TOBYDIC DEWO + Probiotics", "category": "supplement",
+     "description_short": "DEWO herbal blend + probiotic & prebiotic — healthy intestinal function"},
+    {"id": "TCOUG2OZ", "title": "TOBYDIC Throat & Respiratory Support", "category": "supplement",
+     "description_short": "Herbal drops: elderberry, echinacea, mullein — throat, respiratory & immune support"},
+    {"id": "TMULTI2OZ", "title": "TOBYDIC Multivitamin 21-in-1", "category": "supplement",
+     "description_short": "Daily multivitamin drops — immune, joint, skin & coat support"},
+    {"id": "TFTMUL2OZ", "title": "TOBYDIC Flea & Tick Support", "category": "supplement",
+     "description_short": "Oral herbal drops — flea & tick season support, skin & coat (never 'kills/prevents')"},
+]
+
+
+def _is_tobydic(brand: str) -> bool:
+    return (brand or "").strip().lower() == "tobydic"
+
+
+def brand_products(brand: str = "BelovedPets") -> list[dict]:
+    """Каталог именно этого бренда. Чужие SKU в промпт не попадают."""
+    return list(TOBYDIC_PRODUCTS) if _is_tobydic(brand) else all_products()
 
 
 def all_products() -> list[dict]:
@@ -184,18 +229,18 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 
-def find_exact(title: str) -> dict | None:
+def find_exact(title: str, brand: str = "BelovedPets") -> dict | None:
     """Товар по полному названию (регистр и пунктуация не важны). None — такого нет."""
     n = _norm(title)
     if not n:
         return None
-    for p in all_products():
+    for p in brand_products(brand):
         if _norm(p.get("title", "")) == n:
             return p
     return None
 
 
-def find_mentioned(title: str) -> dict | None:
+def find_mentioned(title: str, brand: str = "BelovedPets") -> dict | None:
     """Товар, чьё название совпадает или является началом указанного (и наоборот).
 
     Джек иногда обрезает хвост названия — это не «выдуманный товар», а неполное имя.
@@ -203,7 +248,7 @@ def find_mentioned(title: str) -> dict | None:
     n = _norm(title)
     if len(n) < 12:
         return None
-    for p in all_products():
+    for p in brand_products(brand):
         pn = _norm(p.get("title", ""))
         if n == pn or n.startswith(pn[:60]) or pn.startswith(n[:60]):
             return p
@@ -216,14 +261,26 @@ def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
     Раньше в промпт уходил `short_title(..., 50)`, и хвост «(Salmon (for Cats))»
     отрезался вместе со вкусом — Джек про вкус и не знал.
     """
-    if (brand or "").strip().lower() != "belovedpets":
-        return ("\nБИБЛИОТЕКИ ТОВАРОВ ПО ЭТОМУ БРЕНДУ НЕТ. Бери товары ТОЛЬКО из прошлых постов "
-                "и ТЗ этого бренда. СТРОГО ЗАПРЕЩЕНО называть SKU другого бренда (Beloved Pets "
-                "и его линейки) — это разные бренды. Не знаешь точное название — напиши общо "
-                "(«наши капли»), но чужое имя не подставляй и своё не выдумывай.\n")
+    if _is_tobydic(brand):
+        lines = ["=== БИБЛИОТЕКА ТОВАРОВ TOBYDIC (единственный источник названий, 7 SKU) ===",
+                 "Все — herbal liquid drops 2 oz / 60 ml для собак и кошек, с 12 недель. "
+                 "Фокус ~70% контента: Urinary, Multivitamin 21-in-1, Yeast & Skin."]
+        for p in TOBYDIC_PRODUCTS:
+            lines.append(f"  • {p['title']}   — {p['description_short']}")
+        lines.append("СТРОГО ЗАПРЕЩЕНО называть товары Beloved Pets и любых других брендов — "
+                     "у Tobydic только эти 7 позиций.")
+        return "\n".join(lines)
+
+    items = all_products()[:limit]
+    if not items:
+        # Каталог не загрузился (нет файла и нет копии в общей базе). Без списка Джек
+        # гарантированно выдумает названия — поэтому запрещаем называть SKU вообще.
+        return ("\nБИБЛИОТЕКА ТОВАРОВ СЕЙЧАС НЕДОСТУПНА. Конкретные названия товаров НЕ пиши — "
+                "ни одного. В строке **Товар:** пиши «уточнить у Марии», в тексте — общо "
+                "(«our drops», «our chews»). Выдумывать названия, вкусы и линейки нельзя.\n")
 
     by_cat: dict[str, list[dict]] = {}
-    for p in all_products()[:limit]:
+    for p in items:
         by_cat.setdefault(str(p.get("category") or "Прочее"), []).append(p)
 
     lines = ["=== БИБЛИОТЕКА ТОВАРОВ (единственный источник названий) ==="]
@@ -269,15 +326,15 @@ def product_rule(brand: str = "BelovedPets") -> str:
 def validate_products(text: str, brand: str = "BelovedPets") -> list[str]:
     """Проверка готового ТЗ: товар назван, существует, вкус указан. Пустой список — всё ок."""
     problems: list[str] = []
-    if (brand or "").strip().lower() != "belovedpets":
-        return problems                      # каталога по бренду нет — проверять не с чем
+    if not brand_products(brand):
+        return problems                      # каталог не загрузился — проверять не с чем
     m = re.search(r"^\s*\*\*Товар(?: в кадре)?:\*\*\s*(.+)$", text or "", re.M)
     if not m:
         return ["в ТЗ нет строки «**Товар:**» с названием из библиотеки"]
     named = m.group(1).strip().strip("*").split("·")[0].strip()
     if named.lower().startswith(("вся линейка", "бренд", "нет", "—")):
         return problems                      # бренд-ТЗ без конкретного SKU — это законно
-    p = find_exact(named) or find_mentioned(named)
+    p = find_exact(named, brand) or find_mentioned(named, brand)
     if not p:
         problems.append(f"товара «{named[:70]}» нет в библиотеке — название выдумано или искажено")
         return problems

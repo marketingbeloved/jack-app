@@ -34,7 +34,8 @@ def render() -> None:
 
     st.caption("Джек читает прошлые месяцы — темы, форматы, наши ТЗ, цифры Instagram — "
                "и пишет весь следующий месяц: темы, хуки, готовые скрипты, подписи. "
-               f"Структура держится: 1 пост в неделю — фото от блогера у {photo_name}, "
+               f"Постим 3 раза в неделю: {plan_generator.posting_days_ru(brand)}. "
+               f"Первый пост недели — фото от блогера у {photo_name}, "
                f"остальное — карусели, анимации и рилсы разных форматов у {video_name}. "
                "Исполнители подставляются по прошлым месяцам этого бренда.")
 
@@ -70,10 +71,24 @@ def render() -> None:
                                 index=_labels.index(_next) if _next in _labels else 0,
                                 key="gen_month_sel")
     gy, gm = months[month_label]
-    weeks = plan_generator.month_skeleton(gy, gm, photo_owner=photo_owner,
+    weeks = plan_generator.month_skeleton(gy, gm, brand=brand, photo_owner=photo_owner,
                                           video_owner=video_owner)
-    gc2.metric("Слотов в месяце", sum(len(w) for w in weeks),
-               f"{len(weeks)} недель · {len(weeks)} фото блогера")
+    ideas = plan_analytics.month_posts(brand, f"{gm:02d}")
+    weeks = plan_generator.apply_team_ideas(weeks, ideas, photo_owner)
+    n_free = plan_generator.free_slots(weeks)
+    gc2.metric("Джек напишет постов", n_free,
+               f"{sum(len(w) for w in weeks)} дней постинга · {len(ideas)} идей команды уже в плане")
+    if ideas:
+        with st.expander(f"💡 Ваши идеи на {month_label.lower()} — Джек их не трогает, а развивает "
+                         f"({len(ideas)})", expanded=False):
+            for i in ideas:
+                st.markdown(f"- {i['date']} · {_FMT_RU.get(i['format'], 'идея')} — {i['title']}")
+            off = [i for i in ideas
+                   if date(gy, gm, int(i["date"].split(".")[0])).weekday()
+                   not in plan_generator.posting_days(brand)]
+            if off:
+                st.caption("Не в дни постинга (" + plan_generator.posting_days_ru(brand) + "): "
+                           + ", ".join(i["date"] for i in off) + ". Джек их оставит как есть.")
 
     market = st.selectbox("Рынок", ["US", "UK", "CA"], index=0, key="gen_month_market")
     extra = st.text_area(
@@ -83,19 +98,23 @@ def render() -> None:
 
     if st.button(f"🐾 Джек, напиши план на {month_label.lower()}", type="primary",
                  use_container_width=True, key="gen_month_go"):
-        if not analysis.get("total"):
+        if not analysis.get("total") and not ideas:
             st.error("В базе нет прошлых месяцев — Джеку не на чем строить анализ.")
+        elif not n_free:
+            st.info("Все дни постинга этого месяца уже заняты вашими постами — писать нечего.")
         else:
             _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
-                      owners, month_label)
+                      owners, month_label, ideas)
 
     _preview(brand, owners)
 
 
 def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
-              owners, month_label) -> None:
-    progress = st.progress(0.0, text="Джек читает прошлые месяцы…")
-    strategy = plan_generator.month_strategy(analysis, gy, gm, brand, extra)
+              owners, month_label, ideas=None) -> None:
+    progress = st.progress(0.0, text="Джек читает прошлые месяцы и ваши идеи…")
+    strategy = plan_generator.month_strategy(analysis, gy, gm, brand, extra,
+                                             slots=plan_generator.free_slots(weeks),
+                                             ideas=ideas)
     if strategy.get("error"):
         progress.empty()
         st.error(f"Не получилось собрать стратегию: {strategy['error']}")
@@ -105,15 +124,18 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
 
     name_map = {s: m.get("name", s) for s, m in owners.items()}
     posts: list[dict] = []
-    used: list[str] = []
+    used: list[str] = [i["title"] for i in ideas or []]
     failed: list[int] = []
     for i, week in enumerate(weeks, start=1):
+        if all(s.get("fixed") for s in week):
+            continue                         # неделя целиком из идей команды
         progress.progress(i / (len(weeks) + 1),
                           text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
         got = plan_generator.generate_week(
             week, strategy, analysis, i, len(weeks), brand=brand, market=market,
             used_titles=used, extra=extra, owner_names=name_map,
-            team_roles={s: m.get("role", "") for s, m in owners.items()})
+            team_roles={s: m.get("role", "") for s, m in owners.items()},
+            ideas=ideas)
         if not got:
             failed.append(i)
             continue
@@ -146,8 +168,11 @@ def _preview(brand: str, owners: dict) -> None:
 
     if strategy.get("big_idea"):
         st.info(f"**Идея месяца.** {strategy['big_idea']}")
+    if strategy.get("team_ideas"):
+        st.markdown("**💡 Что Джек увидел в ваших идеях**\n"
+                    + "\n".join(f"- {x}" for x in strategy["team_ideas"][:5]))
     sc1, sc2, sc3 = st.columns(3)
-    for col, key, title in ((sc1, "keep", "✅ Оставляем"), (sc2, "drop", "🚫 Убираем"),
+    for col, key, title in ((sc1, "keep", "✅ Оставляем"), (sc2, "drop", "🚫 Провалилось по цифрам"),
                             (sc3, "new_bets", "🎲 Новые заходы")):
         items = strategy.get(key) or []
         if items:

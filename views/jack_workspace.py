@@ -9,7 +9,7 @@ from datetime import datetime
 import streamlit as st
 
 from utils.jack_svg import render_jack
-from models.jack_engine import load_concepts, update_status, delete_concept
+from models.jack_engine import load_concepts, update_status, delete_concept, limit_hashtag_list
 
 # Make scripts/jack_notion.py importable
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
@@ -1044,7 +1044,7 @@ def _render_approve_kanban():
         caption_html = ""
         if c.get("format") == "IGCaption" or c.get("caption"):
             cap = (c.get("caption") or "").replace("\n", "<br/>")
-            tags = " ".join(c.get("hashtags") or [])
+            tags = " ".join(limit_hashtag_list(c.get("hashtags") or []))
             first = c.get("first_comment") or ""
             caption_html = (
                 '<div style="margin-top:10px; padding:12px 14px; background:#FFFBEB; border:1px solid #FCD34D; border-radius:10px;">'

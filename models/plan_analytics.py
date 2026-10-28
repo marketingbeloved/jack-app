@@ -33,8 +33,29 @@ _FORMAT_LABELS = {
     "reel":          "рилс / видео",
     "lifestyle":     "life pic (статичное фото)",
     "promo":         "промо / скидка",
-    "other":         "прочее",
+    "graphic":       "графика / пост от дизайнера",
+    # Не «прочее»: это темы, которые команда придумала сама, просто без слова-формата в
+    # названии. Под «прочим» модель считала их мусором и предлагала убрать.
+    "other":         "идея команды (формат в названии не указан)",
 }
+
+# Если по названию формат не понять — смотрим ТЗ. Строку «**Формат:** …» пишет сам Джек
+# (plan_generator._brief_text), в ручных ТЗ формат виден по слайдам/сценам.
+_BRIEF_FORMAT_LINE = [
+    ("blogger_photo", r"фото\s*(?:от\s*)?блогер"),
+    ("animation",     r"анимац|оживл"),
+    ("carousel",      r"карусел|carousel"),
+    ("lifestyle",     r"life\s*pic|статичн"),
+    ("promo",         r"промо|promo"),
+    ("reel",          r"reel|рилс|видео|video"),
+]
+_BRIEF_FORMAT_HINTS = [
+    ("carousel",  r"слайд\s*\d|slide\s*\d"),
+    ("animation", r"оживл|анимац"),
+    ("reel",      r"\d+\s*[-–]\s*\d+\s*сек|voiceover|сцена\s*\d"),
+]
+# Последний шанс — по исполнителю: Вика делает графику, Дина — видео.
+_OWNER_FORMAT = {"vika": "graphic", "dina": "reel"}
 
 _TYPE_LABELS = {"engaging": "вовлекающий", "selling": "продающий",
                 "viral": "вирусный", "neutral": "без категории"}
@@ -44,12 +65,48 @@ _MONTH_RU = {"01": "январь", "02": "февраль", "03": "март", "04
              "09": "сентябрь", "10": "октябрь", "11": "ноябрь", "12": "декабрь"}
 
 
-def detect_format(title: str) -> str:
+def detect_format(title: str, brief: str = "", owner: str = "") -> str:
     low = (title or "").lower()
     for name, pattern in _FORMAT_RULES:
         if re.search(pattern, low):
             return name
-    return "other"
+    text = (brief or "").lower()
+    m = re.search(r"\*\*формат:\*\*\s*(.+)", text)
+    if m:
+        for name, pattern in _BRIEF_FORMAT_LINE:
+            if re.search(pattern, m.group(1)):
+                return name
+    for name, pattern in _BRIEF_FORMAT_HINTS:
+        if re.search(pattern, text):
+            return name
+    return _OWNER_FORMAT.get((owner or "").lower(), "other")
+
+
+def month_posts(brand: str, month: str) -> list[dict]:
+    """Посты, которые команда уже поставила в этот месяц, — её идеи.
+
+    Джек опирается на них при генерации месяца: не переписывает, не предлагает убрать,
+    а развивает и пишет новые посты только на свободные дни.
+    """
+    plan = _load_plan(brand)
+    briefs = _load_briefs()
+    out: list[dict] = []
+    for date_key, cell in plan.items():
+        if _month_of(date_key) != month:
+            continue
+        for p in cell or []:
+            brief = ((briefs.get(p.get("id", "")) or {}).get("text") or "").strip()
+            out.append({
+                "date": date_key,
+                "title": p.get("title", ""),
+                "type": p.get("type", "neutral"),
+                "pillar": p.get("pillar", ""),
+                "owner": p.get("owner", "") or "",
+                "format": detect_format(p.get("title", ""), brief, p.get("owner", "")),
+                "brief": brief,
+            })
+    out.sort(key=lambda x: int(x["date"].split(".")[0]))
+    return out
 
 
 def _load_plan(brand: str) -> dict:
@@ -95,7 +152,11 @@ def collect(brand: str = "BelovedPets", months: list[str] | None = None) -> dict
         last_day = max((int(dk.split(".")[0]) for dk in plan
                         if _month_of(dk) == this_month), default=0)
         finished = this_month in present and 0 < last_day <= today.day
-        months = [m for m in present if m != this_month or finished] or present
+        # Ключи плана без года («03.11»), поэтому «будущее» = ближайшие 3 месяца вперёд.
+        # Их посты — идеи команды на планируемый месяц (month_posts), а не история.
+        ahead = {f"{(today.month - 1 + k) % 12 + 1:02d}" for k in (1, 2, 3)}
+        months = [m for m in present
+                  if m not in ahead and (m != this_month or finished)] or present
     months = [m for m in months if m in present]
 
     posts: list[dict] = []
@@ -113,7 +174,7 @@ def collect(brand: str = "BelovedPets", months: list[str] | None = None) -> dict
                 "type": p.get("type", "neutral"),
                 "pillar": p.get("pillar", ""),
                 "owner": p.get("owner", "") or "",
-                "format": detect_format(title),
+                "format": detect_format(title, brief.get("text") or "", p.get("owner", "")),
                 "brief": (brief.get("text") or "").strip(),
             })
 

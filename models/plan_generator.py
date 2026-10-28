@@ -1,10 +1,10 @@
 """Jack writes a whole month of content plan from the previous months' evidence.
 
-Two-stage on purpose. One giant call for ~22 posts with full scripts gets truncated and
+Two-stage on purpose. One giant call for ~13 posts with full scripts gets truncated and
 the tail turns to mush, so:
   1. `month_strategy()` — one small call: what the month is about, which formats to push
      or drop, which mistakes from last month not to repeat. Cheap, reviewable.
-  2. `generate_week()` — one call per week, ~5 posts with hook + ready script. Short
+  2. `generate_week()` — one call per week, ~3 posts with hook + ready script. Short
      enough to come back complete, and each call sees the titles already generated so
      weeks don't repeat each other.
 
@@ -19,9 +19,25 @@ import json
 import re
 from datetime import date, timedelta
 
-from models.jack_engine import _parse_json, _system_prompt, call_claude
+from models.jack_engine import (MAX_HASHTAGS, _parse_json, _system_prompt, call_claude,
+                                limit_hashtags)
 
 WEEKDAY_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+
+# Дни постинга по брендам (0 = понедельник). Решение Марии от 2026-10-24:
+# BelovedPets — пн/ср/пт, Tobydic — пн/вт/чт. Бренд без записи постит по будням.
+POSTING_DAYS = {
+    "belovedpets": (0, 2, 4),
+    "tobydic": (0, 1, 3),
+}
+
+
+def posting_days(brand: str) -> tuple[int, ...]:
+    return POSTING_DAYS.get((brand or "").strip().lower(), (0, 1, 2, 3, 4))
+
+
+def posting_days_ru(brand: str) -> str:
+    return ", ".join(WEEKDAY_RU[d] for d in posting_days(brand))
 
 # The structure Darya fixed: one blogger photo a week (Vika), the rest split between
 # carousels, animations and reels of varying formats (Dina).
@@ -75,14 +91,15 @@ def owner_for_format(fmt: str, team_roles: dict[str, str], fallback: str) -> str
 
 
 def month_skeleton(year: int, month: int, *,
-                   weekdays_only: bool = True,
+                   brand: str = "",
                    photo_owner: str = "vika",
                    video_owner: str = "dina") -> list[list[dict]]:
-    """Weeks of empty slots for the month. Monday of each week is the blogger-photo slot."""
+    """Weeks of empty slots for the month, only on the brand's posting days.
+    The first slot of each week is the blogger-photo slot."""
     last = calendar.monthrange(year, month)[1]
+    allowed = posting_days(brand)
     days = [date(year, month, d) for d in range(1, last + 1)]
-    if weekdays_only:
-        days = [d for d in days if d.weekday() < 5]
+    days = [d for d in days if d.weekday() in allowed]
 
     weeks: list[list[dict]] = []
     current: list[dict] = []
@@ -112,6 +129,57 @@ def month_skeleton(year: int, month: int, *,
     return weeks
 
 
+def apply_team_ideas(weeks: list[list[dict]], ideas: list[dict],
+                     photo_owner: str = "vika") -> list[list[dict]]:
+    """Пометить дни, где у команды уже стоит пост, как занятые (`fixed`).
+
+    Занятые слоты Джек не пишет — генерация идёт только по свободным. Если идея команды
+    встала на слот «фото от блогера», фото переезжает на первый свободный день недели;
+    если в неделе фото блогера уже есть у команды — второе не ставим.
+    """
+    by_date: dict[str, list[dict]] = {}
+    for idea in ideas:
+        by_date.setdefault(idea["date"], []).append(idea)
+
+    for week in weeks:
+        week_dates = {s["date"] for s in week}
+        has_photo = any(i["format"] == "blogger_photo"
+                        for d in week_dates for i in by_date.get(d, []))
+        for slot in week:
+            if slot["date"] in by_date:
+                slot["fixed"] = by_date[slot["date"]]
+        photo_slot = next((s for s in week if s["format"] == "blogger_photo"), None)
+        if photo_slot and (photo_slot.get("fixed") or has_photo):
+            photo_slot["format"] = ""
+            free = next((s for s in week if not s.get("fixed")), None)
+            if free and not has_photo:
+                free["owner"], photo_slot["owner"] = photo_owner, free["owner"]
+                free["format"] = "blogger_photo"
+    return weeks
+
+
+def free_slots(weeks: list[list[dict]]) -> int:
+    return sum(1 for w in weeks for s in w if not s.get("fixed"))
+
+
+def team_ideas_block(ideas: list[dict]) -> str:
+    """Идеи команды на этот месяц — текстом для промпта."""
+    if not ideas:
+        return "ИДЕИ КОМАНДЫ НА ЭТОТ МЕСЯЦ: пока нет — весь месяц пишешь ты."
+    from models.plan_analytics import _FORMAT_LABELS
+    lines = ["ИДЕИ КОМАНДЫ НА ЭТОТ МЕСЯЦ — уже стоят в плане, их придумала Мария/команда. "
+             "Это ГЛАВНЫЙ сигнал, куда двигаться:"]
+    for i in ideas:
+        brief = re.sub(r"\s+", " ", i.get("brief") or "")[:220]
+        lines.append(f"  • {i['date']} «{i['title']}» [{_FORMAT_LABELS.get(i['format'], i['format'])}"
+                     f"{', ' + i['pillar'] if i.get('pillar') else ''}]" + (f" — {brief}" if brief else ""))
+    lines.append(
+        "Как с ними работать: НЕ удаляй, НЕ переписывай и НЕ ставь в `drop`. Разбери, что в них "
+        "общего (темы, товары, боли, тон), и предложи НОВЫЕ посты, которые эти идеи развивают и "
+        "дополняют — другой угол, другой формат, другой товар. Дословно не повторяй.")
+    return "\n".join(lines)
+
+
 def _rules_block(brand: str) -> str:
     try:
         from models.jack_lessons import render_rules_for_prompt
@@ -123,16 +191,8 @@ def _rules_block(brand: str) -> str:
 def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
     """Точный список SKU с категорией — чтобы Джек не выдумывал товары и не путал
     тритсы с добавками (от категории зависит, можно ли ставить бейдж 'Lab tested')."""
-    # Каталог в products.json — ТОЛЬКО BelovedPets (58 SKU, ни одного Tobydic). Подсовывать
-    # его Тане нельзя: Джек начинал вписывать чужие товары в планы Tobydic — «Beloved Pets
-    # Sweet Potato Dog Treats» в посте Tobydic и SKU BelovedPets без бренда в названии.
-    if brand.strip().lower() != "belovedpets":
-        return ("\nКАТАЛОГА ТОВАРОВ ПО ЭТОМУ БРЕНДУ У ТЕБЯ НЕТ. Бери товары ТОЛЬКО из прошлых "
-                "постов и ТЗ этого бренда, приведённых выше. СТРОГО ЗАПРЕЩЕНО называть товары "
-                "другого бренда (Beloved Pets и любые его SKU) — это разные бренды с разными "
-                "линейками. Не знаешь точное название — напиши общее («наши капли»), но чужое "
-                "имя не подставляй.\n")
-
+    # У каждого бренда свой каталог (products.brand_products): Tobydic — 7 своих SKU, без
+    # товаров BelovedPets. Раньше Тане подсовывали пустоту, и Джек вписывал чужие SKU.
     # Полные названия со вкусом — через общую библиотеку. Раньше здесь стоял
     # short_title(..., 50), и хвост «(Salmon (for Cats))» отрезался вместе со вкусом.
     try:
@@ -164,29 +224,40 @@ def _month_ru(month: int) -> str:
 
 
 def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedPets",
-                   extra: str = "") -> dict:
+                   extra: str = "", slots: int = 0, ideas: list[dict] | None = None) -> dict:
     """One call: the month's angle, what to push, what to drop. Returns a dict, never raises."""
     from models.plan_analytics import as_prompt_block
 
+    slots = slots or sum(len(w) for w in month_skeleton(year, month, brand=brand))
+    ideas = ideas or []
     system = _system_prompt() + _rules_block(brand)
     prompt = f"""\
 Ты планируешь Instagram-контент {brand} на {_month_ru(month)} {year}.
+Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
+(идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
+должна быть ровно {slots}.
+
+{team_ideas_block(ideas)}
 
 {as_prompt_block(analysis)}
 
 ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
 {extra or '(нет)'}
 
-Задача: дай СТРАТЕГИЮ месяца, ещё без конкретных постов. Опирайся на факты выше.
+Задача: дай СТРАТЕГИЮ месяца, ещё без конкретных постов. Опирайся на идеи команды и факты выше.
 Если цифр Instagram нет — так и скажи в поле `data_gaps`, не выдумывай числа.
+«Идея команды (формат в названии не указан)» в истории — это НЕ брак и не «прочее», а темы,
+придуманные командой. Их не убираем, а анализируем.
+В `drop` — только то, что ПРОВАЛИЛОСЬ по цифрам Instagram. Нет цифр — `drop` пустой.
 
 Верни ЧИСТЫЙ JSON без обёрток:
 {{
   "big_idea": "1-2 фразы — про что месяц, чем отличается от прошлого",
+  "team_ideas": ["что ты увидел в идеях команды (темы, товары, углы) и как новые посты их развивают"],
   "keep": ["что из прошлых месяцев работает и повторяем — с обоснованием из данных"],
-  "drop": ["что перестаём делать и почему"],
+  "drop": ["только провалы по цифрам; нет цифр — пустой список"],
   "new_bets": ["2-4 новых захода, которых не было"],
-  "format_mix": {{"reel": 8, "carousel": 5, "animation": 3, "lifestyle": 2}},
+  "format_mix": {{"reel": 4, "carousel": 3, "animation": 1, "lifestyle": 1}},
   "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
   "data_gaps": ["чего не хватает, чтобы планировать точнее"]
 }}
@@ -202,10 +273,19 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
                   week_no: int, total_weeks: int, *, brand: str = "BelovedPets",
                   market: str = "US", used_titles: list[str] | None = None,
                   extra: str = "", owner_names: dict[str, str] | None = None,
-                  team_roles: dict[str, str] | None = None) -> list[dict]:
-    """Fill one week's slots with real posts — hook, script, caption. Returns [] on failure."""
-    from models.plan_analytics import as_prompt_block
+                  team_roles: dict[str, str] | None = None,
+                  ideas: list[dict] | None = None) -> list[dict]:
+    """Fill one week's FREE slots with real posts — hook, script, caption. Returns [] on failure.
 
+    Slots marked `fixed` (the team already put a post there) are shown to the model as
+    context and never written over.
+    """
+    from models.plan_analytics import as_prompt_block, _FORMAT_LABELS
+
+    fixed = [s for s in week_slots if s.get("fixed")]
+    week_slots = [s for s in week_slots if not s.get("fixed")]
+    if not week_slots:
+        return []
     used = used_titles or []
     names = owner_names or {}
     theme = ""
@@ -226,6 +306,9 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
             slot_lines.append(
                 f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
                 f'Выбери формат: carousel / animation / reel / lifestyle.')
+    fixed_lines = [f'- {s["date"]} ({s["weekday"]}) — ЗАНЯТО идеей команды: «{i["title"]}» '
+                   f'[{_FORMAT_LABELS.get(i["format"], i["format"])}]. Не пиши для этого дня.'
+                   for s in fixed for i in s["fixed"]]
 
     system = _system_prompt() + _rules_block(brand)
     prompt = f"""\
@@ -242,11 +325,14 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 {extra or '(нет)'}
 
 {_catalog_block(brand)}
+{team_ideas_block(ideas or [])}
+
 Уже занятые темы в этом месяце — НЕ повторяй:
 {'; '.join(used[-40:]) or '(пока пусто)'}
 
 СЛОТЫ НЕДЕЛИ (ровно столько постов, ни больше ни меньше, даты не меняй):
 {chr(10).join(slot_lines)}
+{('Уже стоит в этой неделе (контекст, НЕ пиши):' + chr(10) + chr(10).join(fixed_lines)) if fixed_lines else ''}
 
 Рынок: {market}.
 
@@ -265,7 +351,8 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
   («0-3 сек — что в кадре (РУС) · overlay "English" · voiceover "English"»).
   Для карусели: слайды («Слайд 1 — что в кадре · overlay "English copy"»).
   Для фото от блогера: что за кадр, какой overlay-текст, что выделить.
-- `caption` — подпись под пост на английском, 2-4 строки + CTA.
+- `caption` — подпись под пост на английском, 2-4 строки + CTA. Хэштеги — В КОНЦЕ подписи,
+  НЕ БОЛЬШЕ {MAX_HASHTAGS} штук на пост (лишние отрежутся автоматически).
 - `why` — одной фразой, на чём основано решение (какой факт из истории/цифр).
 - НЕ МУДРИТЬ, но делать КРУТО. Простая съёмка не значит скучная идея: вся выдумка уходит
   в хук и в саму мысль, а не в сложность продакшена.
@@ -292,6 +379,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
   НЕ придумывай, как и в слоте «фото от блогера».
 - `product` бери ТОЧНО из каталога брендa, полным названием SKU. Не сокращай, не выдумывай
   и не смешивай два товара в один. Если для идеи не нашёл подходящего SKU — поменяй идею.
+  Пост про бренд в целом, без конкретного товара — пиши в `product` «вся линейка».
 - COMPLIANCE строго. НЕЛЬЗЯ: cure / treat / heal / FDA / 100% safe / guaranteed /
   "Made in USA" / "vet-developed" / "vet-recommended" / kills / prevents / eliminates.
   МОЖНО: supports, may help with, gentle daily care, natural, holistic.
@@ -318,11 +406,34 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     if parsed.get("error"):
         return []
     posts = parsed.get("posts") or []
-    return _normalise(posts, week_slots, team_roles)
+    return _normalise(posts, week_slots, team_roles, brand)
+
+
+def _check_product(name: str, brand: str) -> str:
+    """Товар из ответа модели → точное название из каталога, или пометка, что его нет.
+
+    Промпт просит брать товар из каталога, но модель всё равно иногда сочиняет. Здесь
+    это ловится до того, как пост уйдёт в план: команда видит ⚠️ прямо в ячейке.
+    """
+    name = (name or "").strip()
+    if not name or name.lower().startswith(("вся линейка", "бренд", "нет", "—", "-", "уточнить",
+                                            "n/a", "none", "any", "любой")):
+        return name
+    try:
+        from models.products import brand_products, find_exact, find_mentioned
+        if not brand_products(brand):
+            return name                      # каталог не загрузился — сверять не с чем
+        p = find_exact(name, brand) or find_mentioned(name, brand)
+    except Exception:
+        return name
+    if p:
+        return p.get("title", name)
+    return f"⚠️ нет в каталоге, проверить: {name}"
 
 
 def _normalise(posts: list[dict], slots: list[dict],
-               team_roles: dict[str, str] | None = None) -> list[dict]:
+               team_roles: dict[str, str] | None = None,
+               brand: str = "BelovedPets") -> list[dict]:
     """Force the model's output back onto the real calendar.
 
     The model drifts on dates and occasionally drops or duplicates a slot, so slots are
@@ -367,10 +478,10 @@ def _normalise(posts: list[dict], slots: list[dict],
             "format": fmt,
             "owner": owner,
             "pillar": (post.get("pillar") or "").strip()[:60],
-            "product": (post.get("product") or "").strip()[:120],
+            "product": _check_product(post.get("product") or "", brand)[:160],
             "hook": (post.get("hook") or "").strip(),
             "script": _clean_md(post.get("script") or ""),
-            "caption": (post.get("caption") or "").strip(),
+            "caption": limit_hashtags((post.get("caption") or "").strip()),
             "why": (post.get("why") or "").strip(),
         })
     return out

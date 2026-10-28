@@ -20,6 +20,39 @@ from models.products import all_products, global_compliance
 
 
 CONCEPTS_FILE = Path(__file__).resolve().parent.parent / "cache" / "concepts.json"
+
+# Хэштегов на пост — не больше пяти (решение Марии от 2026-10-24). Промпты просят об этом
+# словами, а limit_hashtags режет лишнее в коде: модель любит добавить «ещё парочку».
+MAX_HASHTAGS = 5
+_HASHTAG_RE = re.compile(r"(?<![\w&/])#[A-Za-z][\w]*")
+
+
+def limit_hashtag_list(tags: list, n: int = MAX_HASHTAGS) -> list[str]:
+    """Первые n уникальных хэштегов из списка."""
+    out: list[str] = []
+    for t in tags or []:
+        t = str(t).strip()
+        if t and t.lower() not in (x.lower() for x in out):
+            out.append(t)
+    return out[:n]
+
+
+def limit_hashtags(text: str, n: int = MAX_HASHTAGS) -> str:
+    """Оставить в тексте первые n хэштегов, остальные убрать (вместе с лишними пробелами)."""
+    seen: list[str] = []
+
+    def keep(m: re.Match) -> str:
+        tag = m.group(0).lower()
+        if tag in seen:
+            return ""
+        if len(seen) >= n:
+            return ""
+        seen.append(tag)
+        return m.group(0)
+
+    out = _HASHTAG_RE.sub(keep, text or "")
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return re.sub(r"[ \t]+$", "", out, flags=re.M)
 CONCEPTS_FILE.parent.mkdir(exist_ok=True)
 CORPUS_FILE = CONCEPTS_FILE.parent / "notion_briefs_corpus.json"
 
@@ -192,10 +225,12 @@ def _system_prompt() -> str:
         - IG Carousel (3-10 slides): slide 1 hook, slide N CTA, no walls of text
 
         COMPLIANCE (HARD STOPS — never use these words):
-        - NEVER: cure, treat, heal, FDA approved, vet-recommended (without naming a specific vet),
-                 100% safe, guaranteed, made in USA (only OK for TREATS category)
+        - NEVER: cure, treat, heal, FDA approved, vet-recommended, vet-developed, vet-formulated,
+                 100% safe, guaranteed, made in USA (false for every product)
         - SAFE TO USE: supports, may help with, helps maintain, gentle daily care, natural,
-                       vet-formulated, holistic, premium, lab tested
+                       holistic, premium; "lab tested in the USA" — ONLY for TREATS
+        - HASHTAGS: max 5 per post, all at the end of the caption. No extra hashtags in the
+                    first comment.
 
         WHAT JACK ACTUALLY DOES (practical job — SMM for 2 pet brands, BelovedPets + TOBYDIC):
 
@@ -217,7 +252,7 @@ def _system_prompt() -> str:
            крупно"), English when writing what ends up on the customer's screen.
         7. Compliance check every single line against per-SKU rules — never let "cure",
            "treat", "FDA approved", "100% safe" reach a draft. Use "supports", "may help with",
-           "vet-formulated", "natural", "gentle daily care".
+           "natural", "gentle daily care".
         8. Know the catalogue cold — when Darya says "Hemp Oil" you don't ask "which one",
            you check the catalogue, find the SKU, pull the description_short and ingredients.
            If the product isn't in the catalogue, you ASK for a mini-card and save it.
@@ -300,8 +335,8 @@ def _system_prompt() -> str:
 
               "// For IGCaption format ONLY — additional fields": "↓",
               "caption": "publish-ready 150-220 char caption with line breaks (only when format=IGCaption)",
-              "hashtags": ["#belovedpets", "..."],
-              "first_comment": "extra hashtags for algorithm boost in first comment"
+              "hashtags": ["#belovedpets", "... MAX 5 hashtags total"],
+              "first_comment": "short CTA, one sentence, NO hashtags"
             }}
           ]
         }}
@@ -427,6 +462,10 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
     for c in concepts:
         c["id"] = uuid.uuid4().hex[:8]
         c["status"] = "draft"
+        if c.get("hashtags"):
+            c["hashtags"] = limit_hashtag_list(c["hashtags"])
+        if c.get("caption"):
+            c["caption"] = limit_hashtags(c["caption"])
         c["brand"] = req.get("brand", "BelovedPets")
         enriched.append(c)
     if save:
@@ -594,11 +633,11 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
         1. **Overlay-текст для каждого слайда** (если на картинке уже есть текст — не дублируй, предложи что добавить/убрать; если текста нет — дай короткий текст 3-6 слов на слайд).
         2. **Caption** — нормальной средней длины, как у хороших IG pet-брендов: 2-3 строки, ~150-200 символов.
            Цепляющий хук в первой строке, 1-2 эмодзи, тёплый человеческий тон (НЕ «рекламный»), без сухого перечисления выгод.
-        3. **Hashtags** — 8-12 штук, микс ниши + бренд.
-        4. **First comment** — короткий CTA (1 фраза), с учётом рынка {market}.
+        3. **Hashtags** — НЕ БОЛЬШЕ {MAX_HASHTAGS} штук на пост, микс ниши + бренд.
+        4. **First comment** — короткий CTA (1 фраза), с учётом рынка {market}. Без хэштегов.
 
-        COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed.
-        Использовать: supports, daily wellness, vet-formulated, holistic. Мы — supplement, NOT medicine.
+        COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/vet-formulated/vet-developed/Made in USA.
+        Использовать: supports, daily wellness, gentle daily care, holistic. Мы — supplement, NOT medicine.
         НЕ ВЫДУМЫВАЙ конкретику: цены, скидки (%25/Subscribe & Save), бесплатную доставку, пороги заказа,
         акции — НИЧЕГО такого, если этого нет в «пожеланиях от Дарьи» выше. Только то, что реально дано.
 
@@ -607,7 +646,7 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
 
         Выдай аккуратным markdown, готовым к копированию. Без вступлений.
     """)
-    return gemini_vision(prompt, images, mime_types)
+    return limit_hashtags(gemini_vision(prompt, images, mime_types))
 
 
 # ─── Captions: upload a reel video / photos → Jack writes the IG caption ────
@@ -733,12 +772,14 @@ def caption_from_media(images: list[bytes] | None = None,
            напр. human-grade, few ingredients, natural), мини-storytelling, в конце мягкий вопрос/CTA.
         Везде живой хук, 1-2 эмодзи к месту, человеческий тон (НЕ «рекламный»).
 
-        **#️⃣ Hashtags:** 10-12 штук, #belovedpets первым, микс ниши+бренд+рынок {market}.
+        **#️⃣ Hashtags:** ОДИН общий блок на все варианты, НЕ БОЛЬШЕ {MAX_HASHTAGS} штук,
+        фирменный хэштег бренда первым, микс ниши+бренд+рынок {market}. В самих вариантах подписи хэштегов нет.
 
-        **💬 First comment:** короткий CTA в одну фразу (учитывай рынок {market}).
+        **💬 First comment:** короткий CTA в одну фразу (учитывай рынок {market}), без хэштегов.
 
-        COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/clinically proven.
-        Можно: supports, may help, daily wellness, vet-formulated, holistic. Мы — supplement, NOT medicine.
+        COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/clinically proven/
+        vet-formulated/vet-developed/Made in USA.
+        Можно: supports, may help, daily wellness, gentle daily care, holistic. Мы — supplement, NOT medicine.
         НЕ ВЫДУМЫВАЙ цены, скидки, %25, Subscribe & Save, доставку, пороги — ничего, чего нет в пожеланиях.
 
         Контекст бренда (тон, продукты): {brand_ctx[:2000]}
@@ -751,7 +792,7 @@ def caption_from_media(images: list[bytes] | None = None,
         out = gemini_video(_rules(_SEEN_VIDEO), video_bytes, _video_mime(video_suffix),
                            images, mime_types)
         if not out.startswith("⚠️"):
-            return out
+            return limit_hashtags(out)
 
     # 2. Видео не прошло (формат/размер/перегрузка) → раскадровка, как раньше.
     frames = _video_frames(video_bytes, video_suffix) if video_bytes else []
@@ -763,7 +804,7 @@ def caption_from_media(images: list[bytes] | None = None,
             if video_bytes and frames:
                 out = (f"ℹ️ Само видео Gemini не взял — подпись по {len(frames)} кадрам "
                        f"(движение и звук не учтены).\n\n" + out)
-            return out
+            return limit_hashtags(out)
 
     # 3. Ни видео, ни кадров → пишем по описанию и говорим об этом честно.
     out = smart_text(_rules(_SEEN_NONE))
@@ -771,7 +812,7 @@ def caption_from_media(images: list[bytes] | None = None,
         out = ("⚠️ Это видео не удалось ни отправить целиком, ни раскадрировать "
                "(формат/кодек/размер) — подпись написана по описанию, не по картинке. "
                "Для точности добавь скриншот кадра в «Фото».\n\n" + out)
-    return out
+    return limit_hashtags(out)
 
 
 # ─── Проверка заявлений: ловим то, что нам нельзя писать ───────────────────
