@@ -427,6 +427,11 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
         lessons_block = _rules(brand) + _lessons(brand=brand, max_count=15)
     except Exception:
         lessons_block = ""
+    try:
+        from models.audience_insights import render_for_prompt as _insights
+        lessons_block += _insights(brand)
+    except Exception:
+        pass
     system = _system_prompt() + lessons_block + examples
     out = call_claude(_user_prompt(req), system, timeout=180)
     parsed = _parse_json(out)
@@ -487,6 +492,11 @@ def generate_concepts_deep(req: dict, save: bool = False) -> list[dict]:
         extra = _rul(brand) + _les(brand=brand, max_count=15)
     except Exception:
         extra = ""
+    try:
+        from models.audience_insights import render_for_prompt as _insights
+        extra += _insights(brand)
+    except Exception:
+        pass
     system = _system_prompt() + extra + _load_corpus_examples(n=3, kind_hint="", brand=brand)
 
     angle_prompt = textwrap.dedent(f"""\
@@ -1181,6 +1191,82 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     problems = check_brief(out, brand)
     if problems:
         out = _retry_with_problems(user, system, out, problems, brand)
+    return out
+
+
+# ─── Threads — готовый текст поста, а не ТЗ ─────────────────────────────────
+# Threads — канал узнаваемости (решение Марии, 2026-11-03): ни товаров, ни цен, ни
+# ссылок на магазин. Путь Threads → Instagram → Shopify, продаёт уже Instagram.
+THREADS_PART_LIMIT = 500
+
+_SELLING = (r"\bshop now\b", r"\bbuy\b", r"\bdiscount", r"\bsale\b", r"\bpromo",
+            r"\$\d", r"%\s*off", r"link in bio", r"amazon", r"chewy", r"tiktok shop",
+            r"shopify", r"belovedpets\.com", r"subscribe\s*&\s*save")
+
+
+def check_threads_post(text: str) -> list[str]:
+    """Претензии к тексту для Threads: заявления, продажа, части длиннее 500 знаков."""
+    problems: list[str] = []
+    bad = scan_claims(text)
+    if bad:
+        problems.append("запрещённые заявления: " + ", ".join(f"«{b}»" for b in bad))
+    sell = sorted({m.group(0) for p in _SELLING for m in re.finditer(p, text or "", re.I)})
+    if sell:
+        problems.append("продающие слова (в Threads нельзя): " + ", ".join(f"«{s}»" for s in sell))
+    for i, part in enumerate(re.split(r"^\s*—\s*$", text or "", flags=re.M), 1):
+        if len(part.strip()) > THREADS_PART_LIMIT:
+            problems.append(f"часть {i} длиннее {THREADS_PART_LIMIT} знаков ({len(part.strip())})")
+    return problems
+
+
+def threads_post(title: str, pillar: str = "", brand: str = "BelovedPets", extra: str = "") -> str:
+    """Текст одного поста для Threads по теме из календаря (EN, готов к публикации)."""
+    system = _system_prompt()
+    try:
+        from models.jack_lessons import render_rules_for_prompt as _rules
+        system += _rules(brand)
+    except Exception:
+        pass
+    try:
+        from models.audience_insights import render_for_prompt as _insights
+        system += _insights(brand)
+    except Exception:
+        pass
+    user = textwrap.dedent(f"""\
+        Напиши ГОТОВЫЙ текст поста для Threads @beloved_pets_brand (рынок US).
+
+        Тема из календаря: "{title}"
+        Рубрика: {pillar or '(определи сам по теме)'}
+        Пожелания: {extra or '(нет)'}
+
+        ПРАВИЛА THREADS:
+        - Только вовлечение и узнаваемость. НИКАКИХ товаров, цен, скидок, ссылок на магазин,
+          Amazon, Shopify, «link in bio». Продаёт Instagram, не Threads.
+        - Тон: тёплый, как друг; сначала эмпатия; реальная польза; без CAPS, кликбейта, запугивания.
+        - Пост заканчивается вопросом или просьбой ответить (фото, слово, опыт).
+        - Если тема — ветка 🧵: части разделяй строкой с одним символом «—». Каждая часть ≤ {THREADS_PART_LIMIT} знаков.
+        - Симптомы — одна строка «call your vet», без советов по лечению.
+        - Можно мостик в Instagram: «the best ones go on our Instagram» — без ссылок.
+        - Запрещено: cure / treat / heal / relief / prevent / UTI / infection / anti-anxiety /
+          FDA / 100% safe / guaranteed / clinically proven / vet-developed / Made in USA.
+
+        Выдай только текст поста на английском (без кавычек, без вступлений, без ``` ).
+        Последней строкой на русском: «Тег: Dogs of Threads / Cats of Threads / Pet Parents» — один, по теме.
+    """)
+    out = call_claude(user, system, timeout=120)
+    if out.startswith("__ERROR__"):
+        return "⚠️ " + out.replace("__ERROR__", "").strip()
+    out = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", out.strip()).strip()
+    problems = check_threads_post(out)
+    if problems:
+        fix = (user + "\n\nПРЕДЫДУЩИЙ ВАРИАНТ ЗАБРАКОВАН:\n" + "\n".join(f"- {p}" for p in problems)
+               + "\n\nПерепиши пост целиком без этих ошибок.\n\nПредыдущий вариант:\n" + out)
+        second = call_claude(fix, system, timeout=120)
+        if not second.startswith("__ERROR__"):
+            second = re.sub(r"^```(?:markdown)?\s*|\s*```$", "", second.strip()).strip()
+            left = check_threads_post(second)
+            out = second if not left else (
+                "⚠️ Проверка: " + "; ".join(left) + "\n(исправь вручную)\n\n" + second)
     return out
 
 

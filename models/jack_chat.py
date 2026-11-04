@@ -21,6 +21,11 @@ def chat_system_prompt(brand: str = "BelovedPets") -> str:
         rules = render_rules_for_prompt(brand)
     except Exception:
         rules = ""
+    try:
+        from models.audience_insights import render_for_prompt as _insights
+        rules += _insights(brand)
+    except Exception:
+        pass
     base = textwrap.dedent(f"""\
         You are JACK — 28, senior SMM creative for Beloved Pets and Tobydic.
         You're chatting with Darya in Telegram-style: short, warm, human.

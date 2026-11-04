@@ -349,15 +349,55 @@ def views_available(today: date | None = None, plan: dict | None = None) -> dict
     return views
 
 
+# ─── Каналы — у Threads свой календарь ───────────────────────────────────────
+# Threads — канал узнаваемости без продаж (решение Марии, 2026-11-03), поэтому его
+# план живёт отдельно (ключ plan_<brand>_threads) и не мешается с IG/TikTok.
+# Переключатель канала — вверху страницы; всё ниже читает его из session_state.
+CHANNELS = {"main": "📸 Instagram / TikTok", "threads": "🧵 Threads"}
+
+THREADS_FORMATS = {
+    "": "— не указан",
+    "question": "❓ вопрос дня",
+    "thread": "🧵 ветка-польза",
+    "opinion": "💬 мнение / опрос",
+    "story": "🧡 история / сообщество",
+    "photo": "📸 игра / ветка с фото",
+}
+# Рубрика из плана → формат (для загрузки плана из ресёрча).
+# Порядок важен: «фото-ветка» — это фото, а не ветка-польза.
+_THREADS_RUBRIC_FMT = (("фото", "photo"), ("игра", "photo"), ("пропуск", "photo"),
+                       ("ветка", "thread"), ("вопрос", "question"), ("мнение", "opinion"),
+                       ("опрос", "opinion"), ("разговор", "opinion"), ("истори", "story"),
+                       ("сообществ", "story"), ("праздник", "story"))
+_THREADS_SEED = Path(__file__).resolve().parent.parent / "models" / "threads_seed.json"
+
+
+def _channel() -> str:
+    return st.session_state.get("plan_channel", "main")
+
+
+def _is_threads() -> bool:
+    return _channel() == "threads"
+
+
+def _formats() -> dict:
+    return THREADS_FORMATS if _is_threads() else POST_FORMATS
+
+
+def _post_types() -> list[str]:
+    # В Threads продающих постов нет — категорию «Продающий» даже не предлагаем.
+    return ["engaging", "viral", "neutral"] if _is_threads() else ["engaging", "selling", "viral", "neutral"]
+
+
 # ─── Plan store (общая база) — даты/темы синхронятся у всех 4, правятся в UI ──
 def _plan_key(brand: str) -> str:
-    return f"plan_{brand.lower()}"
+    return f"plan_{brand.lower()}" + ("_threads" if _is_threads() else "")
 
 
 def load_plan(brand: str) -> dict:
     """Сетка плана из общей базы (Supabase). Первый раз засевается из захардкоженного
     каркаса (чтобы июньский BelovedPets не потерялся), дальше — источник правды облако."""
-    seed = PLANS_BY_BRAND.get(brand, {})
+    seed = {} if _is_threads() else PLANS_BY_BRAND.get(brand, {})
     try:
         from models import shared_store
         if shared_store.configured():
@@ -384,12 +424,51 @@ def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str
                   owner: str = "", fmt: str = "") -> str:
     import uuid
     plan = load_plan(brand)
-    pid = f"{brand[:2].lower()}{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}"
+    pid = (f"{brand[:2].lower()}{'th' if _is_threads() else ''}"
+           f"{date_key.replace('.', '')}{uuid.uuid4().hex[:3]}")
     plan.setdefault(date_key, []).append(
         {"id": pid, "title": title.strip(), "type": ptype, "pillar": pillar.strip(),
          "owner": owner, "format": (fmt or "").strip()})
     _save_plan(brand, plan)
     return pid
+
+
+def seed_threads_plan(brand: str, owner: str = "maria") -> int:
+    """Загрузить 20 постов плана Threads (09.11–04.12) в календарь Threads.
+
+    Тексты постов из плана ложатся сразу в ячейки как «Текст поста» — их остаётся
+    проверить и опубликовать. Повторное нажатие не дублирует: тема на ту же дату
+    пропускается. Возвращает, сколько постов добавлено.
+    """
+    import json
+    import uuid
+    from models import plan_briefs
+
+    seeds = json.loads(_THREADS_SEED.read_text(encoding="utf-8"))
+    plan = load_plan(brand)
+    added = 0
+    for s in seeds:
+        day = plan.setdefault(s["date"], [])
+        if any(p.get("title") == s["title"] for p in day):
+            continue
+        rub = s["rubric"].lower()
+        fmt = next((f for k, f in _THREADS_RUBRIC_FMT if k in rub), "")
+        pid = f"{brand[:2].lower()}th{s['date'].replace('.', '')}{uuid.uuid4().hex[:3]}"
+        day.append({"id": pid, "title": s["title"], "type": s["type"], "pillar": s["rubric"],
+                    "owner": owner, "format": fmt})
+        text = s["text"]
+        if s.get("tag"):
+            text += f"\n\nТег: {s['tag']}"
+        if s.get("picture"):
+            text += f"\nКартинка: {s['picture']}"
+        if s.get("note"):
+            text += f"\n\n_{s['note']}_"
+        plan_briefs.save(pid, text, title=s["title"], pillar=s["rubric"], for_who=owner,
+                         updated=_now())
+        added += 1
+    if added:
+        _save_plan(brand, plan)
+    return added
 
 
 def set_plan_owner(brand: str, date_key: str, pid: str, owner: str) -> None:
@@ -479,6 +558,10 @@ def _render_calendar(year: int, month: int, plan: dict, briefs: dict, brand: str
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
 
+    st.radio("Канал", list(CHANNELS.keys()), format_func=CHANNELS.get, horizontal=True,
+             key="plan_channel", label_visibility="collapsed")
+    threads = _is_threads()
+
     # План читаем ДО селектора: если посты на следующий месяц уже заведены, месяц
     # показываем, не дожидаясь 20-го числа.
     plan = load_plan(brand)
@@ -496,18 +579,23 @@ def render():
     add_max = (date(ly + 1, 1, 1) if lm == 12 else date(ly, lm + 1, 1)) - timedelta(days=1)
     add_default = max(add_min, min(add_max, date.today()))
 
-    st.markdown(f"# 📅 Контент-план · {brand} · {view_label}")
-    st.caption("Календарь по неделям · цвет = категория · ➕ ТЗ в ячейке = Джек пишет ТЗ Вике. "
-               "Даты/темы добавляются внизу (➕ Добавить пост) — появляются у всей команды сразу.")
+    if threads:
+        st.markdown(f"# 🧵 Threads · {brand} · {view_label}")
+        st.caption("Threads = узнаваемость, без продаж: ни товаров, ни цен, ни ссылок на магазин. "
+                   "Путь: Threads → Instagram → Shopify. 5 постов в неделю, пн–пт. "
+                   "В ячейке — готовый текст поста; публикуем только после «да».")
+        legend = (_legend_pill("engaging", "вопрос, ветка-польза, история, опрос")
+                  + _legend_pill("viral", "фото-ветка, игра, праздник"))
+    else:
+        st.markdown(f"# 📅 Контент-план · {brand} · {view_label}")
+        st.caption("Календарь по неделям · цвет = категория · ➕ ТЗ в ячейке = Джек пишет ТЗ Вике. "
+                   "Даты/темы добавляются внизу (➕ Добавить пост) — появляются у всей команды сразу.")
+        legend = (_legend_pill("engaging", "фото от блогера, забота, обучение")
+                  + _legend_pill("selling", "карусели, Amazon, Faire, промо")
+                  + _legend_pill("viral", "виральный, тренды, POV, мемы"))
 
     st.markdown(
-        f"""
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin: 8px 0 20px 0;">
-            {_legend_pill("engaging", "фото от блогера, забота, обучение")}
-            {_legend_pill("selling", "карусели, Amazon, Faire, промо")}
-            {_legend_pill("viral", "виральный, тренды, POV, мемы")}
-        </div>
-        """,
+        f'<div style="display:flex; gap:10px; flex-wrap:wrap; margin: 8px 0 20px 0;">{legend}</div>',
         unsafe_allow_html=True,
     )
 
@@ -520,20 +608,33 @@ def render():
         st.session_state["_briefs_synced"] = True
     briefs = plan_briefs.load_all()
 
-    if not plan:
+    if threads and brand == "BelovedPets" and _THREADS_SEED.exists():
+        with st.expander("📥 План Threads из ресёрча — 20 постов, 09.11–04.12", expanded=not plan):
+            st.caption("Темы и готовые тексты постов ляжут в календарь Threads у всей команды. "
+                       "Повторное нажатие ничего не задвоит.")
+            if st.button("📥 Загрузить 20 постов", key="seed_threads", type="primary"):
+                n = seed_threads_plan(brand)
+                st.success(f"Добавлено постов: {n}." if n else "Все 20 постов уже в календаре.")
+                st.rerun()
+    elif not plan:
         st.info(f"План **{brand}** ещё пустой. Добавь даты и темы внизу — форма **«➕ Добавить пост»**. "
                 f"Появятся ячейки, и их сразу увидит вся команда (без зипов и пересылок).")
 
     st.markdown(_GRID_CSS, unsafe_allow_html=True)
 
-    mc1, _ = st.columns([1, 3])
-    # По умолчанию рынка НЕТ. Раньше здесь первым стоял UK, и он молча уезжал во все ТЗ
-    # и на страницы Дины в Notion — хотя никто его не выбирал.
-    market = mc1.selectbox(
-        "Рынок (если важен)", ["— не указывать", "US", "UK", "CA"], index=0,
-        key="vika_market", help="Пусто — Джек не пишет рынок в ТЗ и не ставит его Дине в Notion.")
-    market = "" if market.startswith("—") else market
-    st.caption("Нажми **➕ ТЗ** прямо в ячейке → Джек напишет ТЗ для Вики, оно сохранится в коммент (видят все 4). 💬 = ТЗ уже есть.")
+    if threads:
+        market = "US"
+        st.caption("Нажми на пост в ячейке → там текст поста. 💬 = текст уже есть, "
+                   "➕ = Джек напишет текст по теме.")
+    else:
+        mc1, _ = st.columns([1, 3])
+        # По умолчанию рынка НЕТ. Раньше здесь первым стоял UK, и он молча уезжал во все ТЗ
+        # и на страницы Дины в Notion — хотя никто его не выбирал.
+        market = mc1.selectbox(
+            "Рынок (если важен)", ["— не указывать", "US", "UK", "CA"], index=0,
+            key="vika_market", help="Пусто — Джек не пишет рынок в ТЗ и не ставит его Дине в Notion.")
+        market = "" if market.startswith("—") else market
+        st.caption("Нажми **➕ ТЗ** прямо в ячейке → Джек напишет ТЗ для Вики, оно сохранится в коммент (видят все 4). 💬 = ТЗ уже есть.")
 
     owners = _team_owners()
     _avatar_uploader(owners)
@@ -546,8 +647,9 @@ def render():
         _render_calendar(vy, vm, plan, briefs, brand, market, owners)
 
     st.markdown("<br/>", unsafe_allow_html=True)
-    n_comments = len([1 for e in briefs.values() if e.get("text")])
-    st.caption(f"💬 {n_comments} ТЗ для Вики сохранено в этом плане")
+    if not threads:
+        n_comments = len([1 for e in briefs.values() if e.get("text")])
+        st.caption(f"💬 {n_comments} ТЗ для Вики сохранено в этом плане")
 
     # ─── Добавить / удалить пост в плане (синхронно у всех 4) ─────────────────
     with st.expander("➕ Добавить пост в план", expanded=(not plan)):
@@ -557,8 +659,7 @@ def render():
             add_date = ac1.date_input("Дата", value=add_default,
                                       min_value=add_min, max_value=add_max,
                                       key="add_plan_date")
-            add_type = ac2.selectbox("Тип (цвет ячейки)", ["engaging", "selling", "viral", "neutral"],
-                                     key="add_plan_type")
+            add_type = ac2.selectbox("Тип (цвет ячейки)", _post_types(), key="add_plan_type")
             add_title = st.text_input("Тема поста", placeholder="напр. duck strips POV reel", key="add_plan_title")
             pc1, pc2 = st.columns(2)
             add_pillar = pc1.text_input("Пиллар (контекст Джеку, необязательно)",
@@ -590,6 +691,9 @@ def render():
                 st.rerun()
 
     # ─── Brief Jack form ─────────────────────────────────────────────────────
+    # Концепты рилсов строятся вокруг товаров — для Threads это не нужно.
+    if threads:
+        return
     st.markdown('<div class="section-label" style="margin-top:24px;">🚀 Brief Jack to generate concepts</div>', unsafe_allow_html=True)
     with st.form("brief_jack"):
         bc1, bc2 = st.columns(2)
@@ -644,9 +748,10 @@ def _new_post_form(d: date, day_key: str, brand: str, owners: dict) -> None:
         title = st.text_input("Тема поста", key=f"np_title_{day_key}",
                               placeholder="напр. duck strips POV reel")
         c1, c2 = st.columns(2)
-        fmt = c1.selectbox("Формат", list(POST_FORMATS.keys()),
-                           format_func=lambda f: POST_FORMATS[f], key=f"np_fmt_{day_key}")
-        _types = ["engaging", "selling", "viral", "neutral"]
+        _fm = _formats()
+        fmt = c1.selectbox("Формат", list(_fm.keys()),
+                           format_func=lambda f: _fm[f], key=f"np_fmt_{day_key}")
+        _types = _post_types()
         ptype = c2.selectbox("Категория (цвет)", _types,
                              format_func=lambda t: TYPE_COLORS[t]["label"] or "без категории",
                              key=f"np_type_{day_key}")
@@ -710,7 +815,7 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
             has = bool(entry.get("text"))
             dot = "💬 " if has else ""
             avatar = _avatar_html(_owner_of(it), owners)
-            fmt_label = POST_FORMATS.get(it.get("format", ""), "") if it.get("format") else ""
+            fmt_label = _formats().get(it.get("format", ""), "") if it.get("format") else ""
             meta = f'<div class="cell-item-meta">{html.escape(fmt_label)}</div>' if fmt_label else ""
             st.markdown(
                 f'<div class="cell-item" title="{html.escape(it["title"])}" '
@@ -719,7 +824,8 @@ def _render_cell(d: date, key: str, items: list[dict], briefs: dict, brand: str,
                 f'<div class="cell-item-title">{dot}{html.escape(it["title"])}</div>{meta}</div>',
                 unsafe_allow_html=True,
             )
-            with st.popover("💬 ТЗ" if has else "➕ ТЗ", use_container_width=True):
+            _word = "Текст" if _is_threads() else "ТЗ"
+            with st.popover(f"💬 {_word}" if has else f"➕ {_word}", use_container_width=True):
                 _brief_editor(pid, it, entry, brand, market, key, owners)
 
 
@@ -751,24 +857,27 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     who_gen = _meta.get("gen") or _meta["name"]      # родительный: «Вики» / «Дины»
     who_name = _meta["name"]                          # именительный
     who_role = (_meta.get("role") or "").lower()
+    threads = _is_threads()
+    doc = "текст поста" if threads else f"ТЗ для {who_gen}"
 
     # Сам пост: тема, цвет, пиллар, дата. ТЗ при этом сохраняется — оно привязано к id.
     with st.expander("✏️ Изменить пост (тема, цвет, дата)"):
         e_title = st.text_input("Тема поста", value=item.get("title", ""), key=f"et_{pid}")
         ec1, ec2 = st.columns(2)
-        _types = ["engaging", "selling", "viral", "neutral"]
+        _types = _post_types()
         _cur_type = item.get("type", "neutral")
         e_type = ec1.selectbox(
             "Категория (цвет)", _types,
-            index=_types.index(_cur_type) if _cur_type in _types else 3,
+            index=_types.index(_cur_type) if _cur_type in _types else len(_types) - 1,
             format_func=lambda t: TYPE_COLORS[t]["label"] or "без категории",
             key=f"ety_{pid}")
         e_pillar = ec2.text_input("Пиллар", value=item.get("pillar", ""), key=f"ep_{pid}")
-        _fmts = list(POST_FORMATS.keys())
+        _fm = _formats()
+        _fmts = list(_fm.keys())
         _cur_fmt = item.get("format", "")
         e_fmt = st.selectbox("Формат", _fmts,
                              index=_fmts.index(_cur_fmt) if _cur_fmt in _fmts else 0,
-                             format_func=lambda f: POST_FORMATS[f], key=f"efm_{pid}")
+                             format_func=lambda f: _fm[f], key=f"efm_{pid}")
         try:
             _d, _m = day_key.split(".")
             _cur_date = date(date.today().year, int(_m), int(_d))
@@ -804,11 +913,27 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         f"✍️ Что хочешь от {who_gen}? (необязательно)",
         value=entry.get("wish", ""),
         key=f"wish_{pid}",
-        placeholder="напр.: карусель 4 слайда, добавь UK-флаг, акцент на натуральность",
+        placeholder=("напр.: короче, больше юмора, закончи вопросом про кошек" if threads else
+                     "напр.: карусель 4 слайда, добавь UK-флаг, акцент на натуральность"),
     )
 
-    if st.button(f"🐾 Джек, напиши ТЗ для {who_gen}", key=f"gen_{pid}",
-                 use_container_width=True, type="primary"):
+    if threads and st.button("🐾 Джек, напиши текст поста", key=f"gen_{pid}",
+                             use_container_width=True, type="primary"):
+        from models.jack_engine import threads_post
+        _fmt_now = THREADS_FORMATS.get(item.get("format", ""), "") if item.get("format") else ""
+        _extra = (f"Формат: {_fmt_now}. {wish}".strip() if _fmt_now else wish)
+        with st.spinner("🐾 Джек пишет пост для Threads…"):
+            txt = threads_post(title=item["title"], pillar=item.get("pillar", ""),
+                               brand=brand, extra=_extra)
+        if txt.startswith("⚠️") and "\n\n" not in txt:
+            st.error(txt)
+        else:
+            plan_briefs.save(pid, txt, title=item["title"], pillar=item.get("pillar", ""),
+                             updated=_now(), link=link, wish=wish)
+            st.rerun()
+
+    if not threads and st.button(f"🐾 Джек, напиши ТЗ для {who_gen}", key=f"gen_{pid}",
+                                 use_container_width=True, type="primary"):
         from models.jack_engine import brief_for_vika
         # Формат поста (рилс / карусель / life pic …) — часть задания, а не догадка Джека.
         _fmt_now = POST_FORMATS.get(item.get("format", ""), "") if item.get("format") else ""
@@ -842,15 +967,21 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
     # Готовое ТЗ — рендерим как markdown (ссылки внутри кликабельны).
     saved_txt = entry.get("text", "")
     if saved_txt:
-        st.markdown(f"**📝 ТЗ для {who_gen}:**")
-        st.markdown(_linkify(saved_txt))
+        st.markdown(f"**📝 {doc[:1].upper() + doc[1:]}:**")
+        if threads:
+            # Пост показываем строка в строку, как он уйдёт в ленту: markdown склеивал
+            # строки и превращал «—» между частями ветки в продолжение абзаца.
+            st.markdown("  \n".join(html.escape(l) if l.strip() != "—" else "———"
+                                     for l in saved_txt.split("\n")))
+        else:
+            st.markdown(_linkify(saved_txt))
 
-    with st.expander("✏️ Редактировать ТЗ вручную", expanded=not saved_txt):
+    with st.expander(f"✏️ Редактировать {'текст' if threads else 'ТЗ'} вручную", expanded=not saved_txt):
         new = st.text_area(
-            f"ТЗ для {who_gen}",
+            doc,
             value=saved_txt,
             key=f"cmt_{pid}",
-            placeholder=f"нажми кнопку выше — или впиши ТЗ для {who_gen} руками",
+            placeholder=f"нажми кнопку выше — или впиши {doc} руками",
             height=240,
             label_visibility="collapsed",
         )
@@ -900,11 +1031,23 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
                     st.session_state[f"notion_note_{pid}"] = res["note"]
                 st.rerun()
 
-    if saved_txt and to_notion:
+    # Threads публикуем сами, после «да» — ни Notion, ни ClickUp тут не нужны.
+    if saved_txt and threads:
+        st.caption(f"Части ветки разделены строкой «—», лимит 500 знаков на часть. "
+                   "Публикуем вручную, только после «да».")
+        try:
+            from models.jack_engine import check_threads_post
+            _issues = check_threads_post(saved_txt.split("\n\nТег:")[0])
+        except Exception:
+            _issues = []
+        for _p in _issues:
+            st.warning("⚠️ " + _p)
+
+    if saved_txt and to_notion and not threads:
         st.markdown("---")
         _notion_block()
 
-    if saved_txt and not to_notion:
+    if saved_txt and not to_notion and not threads:
         st.markdown("---")
         from models import plan_to_clickup
         sent_cu = entry.get("clickup_url") or st.session_state.get(f"clickup_ok_{pid}")
@@ -948,7 +1091,7 @@ def _brief_editor(pid: str, item: dict, entry: dict, brand: str, market: str, da
         plan_briefs.save(pid, new, title=item["title"], pillar=item["pillar"],
                          updated=_now(), link=link)
         st.rerun()
-    if has and b2.button("🗑 Удалить ТЗ", key=f"del_{pid}", use_container_width=True,
+    if has and b2.button("🗑 Удалить текст" if threads else "🗑 Удалить ТЗ", key=f"del_{pid}", use_container_width=True,
                          help="Удалить только текст ТЗ (сам пост в плане останется)."):
         plan_briefs.delete(pid)
         st.rerun()

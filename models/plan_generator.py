@@ -183,9 +183,15 @@ def team_ideas_block(ideas: list[dict]) -> str:
 def _rules_block(brand: str) -> str:
     try:
         from models.jack_lessons import render_rules_for_prompt
-        return render_rules_for_prompt(brand)
+        rules = render_rules_for_prompt(brand)
     except Exception:
-        return ""
+        rules = ""
+    try:
+        from models.audience_insights import render_for_prompt as _insights
+        rules += _insights(brand)
+    except Exception:
+        pass
+    return rules
 
 
 def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
