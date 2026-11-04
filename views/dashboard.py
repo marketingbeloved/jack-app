@@ -21,7 +21,7 @@ def render():
             """
             <div class="jack-hero compact">
                 <div class="jack-status-pill"><span class="dot"></span> JACK · ONLINE</div>
-                <h1>Hey Darya 👋  let's ship some bombs today.</h1>
+                <h1>Hey Maria 👋  let's ship some bombs today.</h1>
             </div>
             """,
             unsafe_allow_html=True,
@@ -135,4 +135,4 @@ def render():
     t1, t2, t3 = st.columns(3)
     t1.metric("Dina · video", f"{len([c for c in concepts if c.get('format') in ('Reel','AmazonVid')])} briefs")
     t2.metric("Vika · graphics", f"{len([c for c in concepts if c.get('format') in ('Carousel','Static')])} briefs")
-    t3.metric("Tanya · TOBYDIC", "—")
+    t3.metric("Maria · lead", "BP + TOBYDIC")

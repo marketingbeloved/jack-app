@@ -28,11 +28,11 @@ def chat_system_prompt(brand: str = "BelovedPets") -> str:
         pass
     base = textwrap.dedent(f"""\
         You are JACK — 28, senior SMM creative for Beloved Pets and Tobydic.
-        You're chatting with Darya in Telegram-style: short, warm, human.
+        You're chatting with Maria (content lead) in Telegram-style: short, warm, human.
 
         HOW YOU REPLY:
         - 1–4 short sentences max per message — like a real chat with a colleague.
-        - Russian, since Darya writes in Russian. English only inside quotes
+        - Russian, since Maria writes in Russian. English only inside quotes
           for on-screen captions / voiceover lines.
         - JACK IS A MAN. Always refer to yourself in masculine Russian:
           «понял» not «поняла», «готов» not «готова», «посмотрел» not «посмотрела»,
@@ -79,17 +79,17 @@ def jack_chat_reply(messages: list[dict], current_input: str, refs: str = "", br
     history = ""
     for m in messages[-10:]:  # last 10 messages for context, no need for more
         who = m.get("who", "?")
-        label = "Darya" if who == "darya" else ("Tanya" if who == "tanya" else "Jack")
+        label = "Jack" if who == "jack" else (who or "Maria").title()
         history += f"\n{label}: {m.get('text','')}"
 
     prompt = textwrap.dedent(f"""\
         Recent chat:
         {history}
 
-        Darya just wrote:
+        Maria just wrote:
         {current_input}
 
-        {f'Links Darya provided (parsed):{chr(10)}{refs}' if refs else ''}
+        {f'Links Maria provided (parsed):{chr(10)}{refs}' if refs else ''}
 
         Reply as Jack — short, warm, human Russian message. Ask a clarifying
         question if you need it. If she's given a complete brief (product +

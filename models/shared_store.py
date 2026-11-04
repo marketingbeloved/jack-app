@@ -65,11 +65,12 @@ def get_json(key: str, default=None):
 
 
 DEFAULT_TEAM = [
+    # Таня ушла из исполнителей (решение Марии, 2026-11-04): её задачи — Вике и Дине 50/50,
+    # весь контент ведёт Мария.
+    {"name": "Maria", "role": "lead"},
     {"name": "Darya", "role": "admin"},
     {"name": "Dina", "role": "video"},
     {"name": "Vika", "role": "graphics"},
-    {"name": "Tanya", "role": "TOBYDIC"},
-    {"name": "Maria", "role": "smm"},
 ]
 
 

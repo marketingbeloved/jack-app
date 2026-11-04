@@ -57,7 +57,7 @@ def _signals_ready_to_write(reply: str) -> bool:
 def _assemble_brief_from_chat(messages: list, refs: str = "") -> str:
     """Собрать бриф из всего диалога — исходный запрос + все уточнения Дарьи/Тани."""
     lines = [f"- {m.get('text','')}" for m in messages[-14:]
-             if m.get("who") in ("darya", "tanya") and m.get("text")]
+             if m.get("who") not in ("jack", None) and m.get("text")]
     ctx = ("Собери рилс по этому диалогу — учти ВСЕ уточнения (товар/без товара, рынок, "
            "пожелания по формату):\n" + "\n".join(lines))
     if refs:
@@ -282,12 +282,12 @@ def render():
 
     with col_chat:
         st.markdown('<div class="section-label">Drop a task or a fix for Jack</div>', unsafe_allow_html=True)
-        st.caption("Darya and Tanya can write here. Jack will pull comments, then go fill Content Plan + push briefs to Dina in Notion.")
+        st.caption("Maria and the team can write here. Jack will pull comments, then go fill Content Plan + push briefs to Dina in Notion.")
 
         # Chat-like history
         if "ws_messages" not in st.session_state:
             st.session_state["ws_messages"] = [
-                {"who": "jack", "text": "Привет, Даша 🐾 Я с тобой. Кидай задачу — буду писать, или скажи в чём ты застряла, поможем вместе.", "time": "now"},
+                {"who": "jack", "text": "Привет, Мария 🐾 Я с тобой. Кидай задачу — буду писать, или скажи в чём ты застряла, поможем вместе.", "time": "now"},
             ]
 
         # render history
@@ -376,9 +376,9 @@ def render():
         # Кто пишет — ВНЕ формы и с key, чтобы выбор не сбрасывался; имена из общей команды
         try:
             from models import shared_store
-            _team_names = [m.get("name") for m in shared_store.get_team() if m.get("name")] or ["Darya", "Tanya"]
+            _team_names = [m.get("name") for m in shared_store.get_team() if m.get("name")] or ["Maria"]
         except Exception:
-            _team_names = ["Darya", "Tanya"]
+            _team_names = ["Maria"]
         if st.session_state.get("ws_sender") not in _team_names:
             st.session_state.pop("ws_sender", None)
         sender = st.selectbox("Кто пишет", _team_names, key="ws_sender",
@@ -388,7 +388,7 @@ def render():
         # И Дарья, и Таня. Применяются ко ВСЕМ ответам Джека (концепты/ТЗ/чат),
         # хранятся в общей базе → видят все, переживают ребут. Это НЕ правка кода,
         # а управление поведением Джека словами.
-        _rules_brand = "Tobydic" if sender.lower() == "tanya" else brand
+        _rules_brand = brand
         with st.expander(f"⚙️ Инструкции Джеку · {_rules_brand} — чему научить (действует всегда)", expanded=False):
             st.caption("Пиши правила простым текстом — Джек будет соблюдать их в каждом ответе. "
                        "Напр.: «всегда добавляй UK-флаг», «хук ≤ 3 сек», «не используй слово cure», "
@@ -417,12 +417,12 @@ def render():
         # ─── ✍️ Гарантированный запуск: написать рилс СЕЙЧАС по всему диалогу ──
         # Чтобы Джек не зацикливался на уточнениях — Дарья/Таня в любой момент жмут
         # кнопку, и он пишет скрипт по всему сказанному выше (не ждёт «иду писать»).
-        _said = [m for m in st.session_state.get("ws_messages", []) if m.get("who") in ("darya", "tanya")]
+        _said = [m for m in st.session_state.get("ws_messages", []) if m.get("who") not in ("jack", None)]
         if _said and not st.session_state.get("active_job") and st.button(
                 "✍️ Написать рилс сейчас (по всему, что сказали выше)",
                 use_container_width=True, key="force_write"):
             t = datetime.now().strftime("%H:%M")
-            eff_brand = "Tobydic" if sender.lower() == "tanya" else brand
+            eff_brand = brand
             all_txt = " ".join(m.get("text", "") for m in _said)
             req = {
                 "brand": eff_brand, "n": 1, "markets": [_market_from_text(all_txt)],
@@ -489,14 +489,14 @@ def render():
                             st.session_state["ws_messages"][:-1],
                             user_text + "\n\n(Drive URL detected — без Service Account я внутрь не залезу)",
                             refs_context,
-                            brand=("Tobydic" if sender.lower() == "tanya" else brand),
+                            brand=brand,
                         )
                     st.session_state["ws_messages"].append({"who": "jack", "text": reply, "time": t})
                     st.session_state["jack_mood"] = "happy"
                     st.rerun()
 
                 # Brand auto-detection from sender: Tanya → Tobydic, others → current sidebar brand
-                effective_brand = "Tobydic" if sender.lower() == "tanya" else brand
+                effective_brand = brand
 
                 # Notion-push triggers — Дарья прямо говорит «иди создай ТЗ Дине в Notion».
                 # Оформляем ТЗ в базе Videos СРАЗУ (ссылки не обязательны — Дина берёт с Диска).
@@ -588,7 +588,7 @@ def render():
                             f"=== PREVIOUS DRAFT ===\n"
                             f"Title: {prior.get('title','')}\nFormat: {prior.get('format','')}\nHook: {prior.get('hook','')}\nAngle: {prior.get('angle','')}\n"
                             f"Scenes:\n" + "\n".join(prior.get('scenes', [])) + "\n\n"
-                            f"=== DARYA WANTS TO CHANGE ===\n{user_text}\n\n"
+                            f"=== MARIA WANTS TO CHANGE ===\n{user_text}\n\n"
                             f"Перепиши концепт с учётом её правки. Та же база — формат/продукт/рынок, но меняй то что она просит."
                         )
                     req = {
@@ -612,7 +612,7 @@ def render():
                     # «иду писать» → запускаем ФОНОВУЮ генерацию по всему диалогу
                     if _signals_ready_to_write(reply):
                         all_darya = " ".join(m.get("text", "") for m in st.session_state["ws_messages"]
-                                             if m.get("who") in ("darya", "tanya"))
+                                             if m.get("who") not in ("jack", None))
                         req = {
                             "brand": effective_brand, "n": 1,
                             "markets": [_market_from_text(all_darya)],
@@ -760,9 +760,8 @@ def render():
                         format_func=lambda t: {"engaging": "Вовлекающий", "selling": "Продающий",
                                                "viral": "Вирусный", "neutral": "Без цвета"}[t],
                         key=f"ref_type_{_rn}")
-                    ref_owner = pc3.selectbox("Исполнитель", ["dina", "vika", "tanya"],
-                                              format_func=lambda s: {"dina": "Дина", "vika": "Вика",
-                                                                     "tanya": "Таня"}[s],
+                    ref_owner = pc3.selectbox("Исполнитель", ["dina", "vika"],
+                                              format_func=lambda s: {"dina": "Дина", "vika": "Вика"}[s],
                                               key=f"ref_owner_{_rn}")
                     ref_title = st.text_input("Тема поста в календаре",
                                               value=(st.session_state.get("ref_script_product") or "рилс по референсу"),
@@ -1170,7 +1169,7 @@ def _render_approve_kanban():
                             "products": [c.get("product", "")],
                             "pillars": [c.get("pillar", "")] if c.get("pillar") else [],
                             "context": (
-                                f"REWRITE предыдущий концепт с учётом правки Darya.\n\n"
+                                f"REWRITE предыдущий концепт с учётом правки Марии.\n\n"
                                 f"=== ПРЕДЫДУЩИЙ КОНЦЕПТ ===\n"
                                 f"Title: {c.get('title','')}\n"
                                 f"Format: {c.get('format','')}\n"
@@ -1178,7 +1177,7 @@ def _render_approve_kanban():
                                 f"Angle: {c.get('angle','')}\n"
                                 f"Scenes:\n" + "\n".join(c.get('scenes', [])) + "\n"
                                 f"CTA: {c.get('cta','')}\n\n"
-                                f"=== ПРАВКА DARYA ===\n{note_val}\n\n"
+                                f"=== ПРАВКА МАРИИ ===\n{note_val}\n\n"
                                 f"Сделай новый концепт того же формата/продукта/рынка, но с учётом её правки. "
                                 f"НЕ повторяй прошлый hook. Учти что именно ей не понравилось."
                             ),

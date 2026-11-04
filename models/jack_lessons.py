@@ -142,7 +142,7 @@ def render_rules_for_prompt(brand: str, max_count: int = 40) -> str:
     items = list_rules(brand)[:max_count]
     if not items:
         return ""
-    out = ("\n\n=== ПОСТОЯННЫЕ ИНСТРУКЦИИ ОТ КОМАНДЫ (правила, которые задала Дарья/Таня) ===\n"
+    out = ("\n\n=== ПОСТОЯННЫЕ ИНСТРУКЦИИ ОТ КОМАНДЫ (правила, которые задала Мария и команда) ===\n"
            "Это прямые указания заказчика. Соблюдай их во всех ответах — они важнее твоих "
            "привычных шаблонов.\n")
     for r in items:
@@ -156,7 +156,7 @@ def render_rules_for_prompt(brand: str) -> str:
     items = list_rules(brand)
     if not items:
         return ""
-    out = ("\n\n=== ИНСТРУКЦИИ ДЖЕКУ (постоянные правила от Дарьи и Тани — "
+    out = ("\n\n=== ИНСТРУКЦИИ ДЖЕКУ (постоянные правила от Марии и команды — "
            "ОБЯЗАТЕЛЬНО соблюдай в каждом ответе) ===\n")
     for it in items:
         who = f" — {it['author']}" if it.get("author") else ""

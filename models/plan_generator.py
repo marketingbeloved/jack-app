@@ -47,20 +47,36 @@ _ALLOWED_TYPES = {"engaging", "selling", "viral", "neutral"}
 _ALLOWED_FORMATS = {"blogger_photo", "carousel", "animation", "reel", "lifestyle", "promo"}
 
 
+def _active_executors() -> set[str]:
+    """slug'и исполнителей из живой команды — те, у кого роль graphics или video.
+
+    Таня ушла (решение Марии, 2026-11-04), но в истории Tobydic её посты остались — без
+    этого фильтра Джек «выводил из истории», что фото недели делает она.
+    """
+    try:
+        from models import shared_store
+        team = shared_store.get_team()
+    except Exception:
+        return {"vika", "dina"}
+    out = {re.sub(r"[^a-z0-9]+", "", (m.get("name") or "").lower()) for m in team
+           if any(r in (m.get("role") or "").lower() for r in ("graphics", "video"))}
+    return out or {"vika", "dina"}
+
+
 def owners_from_history(analysis: dict) -> tuple[str, str]:
     """Who does the blogger photo, and who does everything else — read off past months.
 
-    Hardcoding Vika and Dina would break the moment Tanya generates a month for TOBYDIC,
-    where the weekly photo is hers. Falls back to the BelovedPets pair when a brand has
-    no history to learn from.
+    Only people who are still executors count (see _active_executors). Falls back to the
+    Vika/Dina pair when a brand has no usable history.
     """
+    active = _active_executors()
     photo_counts = {k: v for k, v in (analysis.get("blogger_photo", {}).get("owners") or {}).items()
-                    if k and k != "—"}
+                    if k in active}
     rest_counts = {k: v for k, v in (analysis.get("by_owner") or {}).items()
-                   if k and k != "—" and k not in photo_counts}
+                   if k in active and k not in photo_counts}
     if not rest_counts:  # everyone shares the same slot type — fall back to all owners
         rest_counts = {k: v for k, v in (analysis.get("by_owner") or {}).items()
-                       if k and k != "—"}
+                       if k in active}
     photo = max(photo_counts, key=photo_counts.get) if photo_counts else "vika"
     video = max(rest_counts, key=rest_counts.get) if rest_counts else "dina"
     return photo, video
@@ -242,6 +258,9 @@ def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedP
 Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
 (идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
 должна быть ровно {slots}.
+Исполнители — только Вика (графика: фото от блогера, carousel, promo) и Дина (видео: reel,
+animation, lifestyle), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
+вместе с еженедельным «фото от блогера» графики и видео в месяце было примерно поровну.
 
 {team_ideas_block(ideas)}
 
@@ -349,11 +368,11 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 Правила:
 - Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
   не ставь три рилса подряд, чередуй carousel / animation / reel / lifestyle.
-- ВАЖНО ПРО «фото от блогера». Исходник выбирает Дарья руками на Google Диске и присылает
+- ВАЖНО ПРО «фото от блогера». Исходник выбирает Мария руками на Google Диске и присылает
   ссылку исполнителю. Ты НЕ знаешь, что на этом фото, и придумывать НЕЛЬЗЯ: не пиши, какое
   там животное, товар, поза или обстановка. В `title` пиши ровно «фото от блогера».
   В `script` дай только то, что применимо к ЛЮБОМУ фото блогера: первой строкой
-  «Исходник: ссылка на фото от Дарьи (выберет с Диска)», затем overlay-текст на английском,
+  «Исходник: ссылка на фото от Марии (выберет с Диска)», затем overlay-текст на английском,
   кадрирование 4:5, тон обработки и что подпись/логотип не должны перекрывать питомца.
   `hook` для такого слота — это текст overlay, а не описание кадра.
 - `hook` — это первые 2 секунды рилса или первый экран карусели, на АНГЛИЙСКОМ, готовый к съёмке.
@@ -388,7 +407,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 - ANIMATION — это НЕ мультик и не motion-графика с нуля. Это: берём готовое ФОТО,
   Дина его оживляет (лёгкое движение в кадре), сверху накладывает текст и звук.
   Фото берётся из одобренного UGC-контента JoinBrands (папка на общем Диске) — так и пиши:
-  «Исходник: одобренное фото из JoinBrands (ссылку даст Дарья)». Что именно на фото —
+  «Исходник: одобренное фото из JoinBrands (ссылку даст Мария)». Что именно на фото —
   НЕ придумывай, как и в слоте «фото от блогера».
 - `product` бери ТОЧНО из каталога брендa, полным названием SKU. Не сокращай, не выдумывай
   и не смешивай два товара в один. Если для идеи не нашёл подходящего SKU — поменяй идею.

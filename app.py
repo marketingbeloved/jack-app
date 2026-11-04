@@ -87,7 +87,7 @@ def _run() -> None:
                     st.rerun()
         except Exception:
             # Защита от кэша Streamlit (старый модуль в памяти до ребута) — не валим всё приложение.
-            st.markdown("- Darya · admin\n- Dina · video\n- Vika · graphics\n- Tanya · TOBYDIC")
+            st.markdown("- Maria · lead\n- Darya · admin\n- Dina · video\n- Vika · graphics")
 
     if page and page in pages:
         try:

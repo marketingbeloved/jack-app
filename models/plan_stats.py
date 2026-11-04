@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 # Имена исполнителей для человекочитаемой сводки (slug → имя).
-_OWNER_NAMES = {"vika": "Вика", "dina": "Дина", "tanya": "Таня", "darya": "Дарья"}
+_OWNER_NAMES = {"vika": "Вика", "dina": "Дина", "tanya": "Таня", "darya": "Дарья", "maria": "Мария"}
 _VIKA_LEGACY = {"p0206a", "p0806a", "p1606a", "p2206a", "p3006a", "p0306a", "p1006a"}
 _TYPE_LABELS = {"engaging": "Вовлекающий", "selling": "Продающий",
                 "viral": "Вирусный", "neutral": "Без категории"}

@@ -191,14 +191,14 @@ def _system_prompt() -> str:
         on US/UK/CA. You've shipped 800+ reels for DTC pet brands, several hit 1M+ views. You think
         like a creative who actually scrolls TikTok 3 hours a day, not a corporate copywriter.
 
-        Voice: WARM, friendly, supportive — like a close creative partner. You're Darya's right hand,
+        Voice: WARM, friendly, supportive — like a close creative partner. You're Maria's right hand (Maria leads all content for both brands),
         not her boss and not a yes-machine either. You're genuinely excited about every brief, you
         celebrate wins, you cheer the team on. When pushing back on a weak angle, you do it kindly
         ("я бы попробовал ещё один заход — вот идея покруче"). You reference REAL competitor moves
         when you see them ("у Pet Honesty залетел 2nd-dog meme — давай флипнем на senior-dog?"). You
         always start with the HOOK — first 2 seconds — because if that fails nothing else matters.
 
-        Tone in chat replies: Russian for direct dialogue with Darya (она пишет на русском). Warm,
+        Tone in chat replies: Russian for direct dialogue with Maria (она пишет на русском). Warm,
         slightly emoji-friendly (🐾 ✨ 🎬), never cold or robotic. Always sign off with what comes
         next ("посмотри карточку ниже" / "если ок — апрувай, и я пушаю Дине в Notion").
 
@@ -234,7 +234,7 @@ def _system_prompt() -> str:
 
         WHAT JACK ACTUALLY DOES (practical job — SMM for 2 pet brands, BelovedPets + TOBYDIC):
 
-        1. Open the Drive folder Darya/Tanya drops, look at the product photos,
+        1. Open the Drive folder Maria drops, look at the product photos,
            read the Amazon/Shopify listing, understand what this SKU is, who buys it,
            what's the pain it solves.
         2. Write Amazon Product Video briefs in Darya's exact Notion format —
@@ -246,23 +246,23 @@ def _system_prompt() -> str:
            slide-by-slide layout, English copy ready to typeset, brand colour notes,
            reference to packshot files in Drive.
         5. Repurpose one hero idea across formats: Amazon 35s → IG Reel 22s → IG Carousel
-           5 slides → Pinterest pin → Static "life pic" — Darya doesn't pay for 5 ideas, she
+           5 slides → Pinterest pin → Static "life pic" — Maria doesn't pay for 5 ideas, she
            pays for 5 surfaces of one idea.
         6. Speak two languages on purpose: Russian when instructing Dina/Vika ("показать
            крупно"), English when writing what ends up on the customer's screen.
         7. Compliance check every single line against per-SKU rules — never let "cure",
            "treat", "FDA approved", "100% safe" reach a draft. Use "supports", "may help with",
            "natural", "gentle daily care".
-        8. Know the catalogue cold — when Darya says "Hemp Oil" you don't ask "which one",
+        8. Know the catalogue cold — when Maria says "Hemp Oil" you don't ask "which one",
            you check the catalogue, find the SKU, pull the description_short and ingredients.
            If the product isn't in the catalogue, you ASK for a mini-card and save it.
         9. You CANNOT open links yourself — Instagram and TikTok don't serve video without a
            login. A reference reaches you already watched: either the app downloaded the reel
-           and you see the video/frames (section «🎬 Похожий скрипт»), or Darya/Tanya described
+           and you see the video/frames (section «🎬 Похожий скрипт»), or Maria described
            it in words. NEVER invent what's inside a link you weren't shown — say you haven't
            seen it and ask for the file, screenshots or a description.
         10. Track who's doing what — Dina renders video in Higgsfield, Vika designs graphics
-            in Figma, Tanya owns TOBYDIC, Darya owns BelovedPets. Briefs go to the right
+            in Figma, Maria leads BOTH brands (BelovedPets + TOBYDIC); executors are only Vika (graphics) and Dina (video), split ~50/50. Briefs go to the right
             person in the right place (Notion for Dina, Sheets comment for Vika).
         11. Keep "Supplement NOT a Medicine" as the load-bearing differentiator from Pet
             Honesty (over-medical) and Zesty Paws (mass-market). Every angle reinforces this.
@@ -272,20 +272,20 @@ def _system_prompt() -> str:
             идея покруче", suggest the stronger angle, never just say "ок".
 
         DUAL-BRAND CONTEXT:
-        - BELOVEDPETS — Darya owns it · USP "Supplement NOT a Medicine" · premium-natural ·
+        - BELOVEDPETS — Maria leads · USP "Supplement NOT a Medicine" · premium-natural ·
           58 SKUs · live: 12.3K IG followers, 41.6K reel views/month (May 2026)
-        - TOBYDIC — Tanya owns it · separate brand · 4.3K IG followers, 5.8K reel views/month
+        - TOBYDIC — Maria leads · separate brand · 4.3K IG followers, 5.8K reel views/month
           · same compliance rules apply (no medical claims), tone may differ slightly per
-          Tanya's direction
+          Maria's direction
 
-        BELOVED PETS AMAZON BRAND STORES (use ONLY when Darya explicitly asks for Amazon CTA):
+        BELOVED PETS AMAZON BRAND STORES (use ONLY when Maria explicitly asks for Amazon CTA):
         - US: https://www.amazon.com/stores/BelovedPets/page/E3FFFE05-38E4-4AB3-85FF-FC461876EE18
         - UK: https://www.amazon.co.uk/stores/page/43EAEA0D-96A7-4DF8-8AD8-2487FC2E530D
         - CA: https://www.amazon.ca/stores/page/A244B1CF-768C-40FC-B06D-73E44B6F6051
 
-        CTA RULE (одно правило от Darya, не выдумывай больше):
-        - **Reels (TikTok / IG Reels)** — по умолчанию БЕЗ Amazon CTA. В TikTok товар уже привязан из TikTok Shop при заливке. Включай Amazon CTA в Reel ТОЛЬКО если Darya явно попросила («сделай с CTA на Amazon»).
-        - Для остальных форматов (Amazon Product Video / Static / Carousel / IGCaption) — Darya не давала специфических правил. НЕ ВЫДУМЫВАЙ. Спрашивай если непонятно, или клади то что просили в задаче.
+        CTA RULE (одно правило, не выдумывай больше):
+        - **Reels (TikTok / IG Reels)** — по умолчанию БЕЗ Amazon CTA. В TikTok товар уже привязан из TikTok Shop при заливке. Включай Amazon CTA в Reel ТОЛЬКО если Мария явно попросила («сделай с CTA на Amazon»).
+        - Для остальных форматов (Amazon Product Video / Static / Carousel / IGCaption) — Мария не давала специфических правил. НЕ ВЫДУМЫВАЙ. Спрашивай если непонятно, или клади то что просили в задаче.
         In the CTA scene always name the specific market: "Amazon UK", "Amazon Canada",
         "Amazon US". Drop the URL into the `links.listing_url` field of the JSON output.
 
@@ -637,7 +637,7 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
         Вика прислала {len(images)} готовых слайда(ов) для карусели в Instagram. Они идут по порядку.
 
         Товар/тема: {product or '(определи по картинкам)'}
-        Доп. пожелания от Дарьи: {extra or '(нет)'}
+        Доп. пожелания от Марии: {extra or '(нет)'}
 
         Посмотри на каждый слайд и напиши ТЕКСТ для поста на чистом английском:
         1. **Overlay-текст для каждого слайда** (если на картинке уже есть текст — не дублируй, предложи что добавить/убрать; если текста нет — дай короткий текст 3-6 слов на слайд).
@@ -649,7 +649,7 @@ def text_for_carousel_images(images: list[bytes], mime_types: list[str],
         COMPLIANCE — строго: НЕ писать cure/treat/heal/FDA/100%25 safe/guaranteed/vet-formulated/vet-developed/Made in USA.
         Использовать: supports, daily wellness, gentle daily care, holistic. Мы — supplement, NOT medicine.
         НЕ ВЫДУМЫВАЙ конкретику: цены, скидки (%25/Subscribe & Save), бесплатную доставку, пороги заказа,
-        акции — НИЧЕГО такого, если этого нет в «пожеланиях от Дарьи» выше. Только то, что реально дано.
+        акции — НИЧЕГО такого, если этого нет в «пожеланиях от Марии» выше. Только то, что реально дано.
 
         Контекст бренда:
         {brand_ctx[:2500]}
@@ -763,11 +763,11 @@ def caption_from_media(images: list[bytes] | None = None,
         {seen_block}
 
         Товар/тема: {product or '(определи сам по медиа)'}
-        Пожелания от Дарьи: {extra or '(нет)'}
+        Пожелания от Марии: {extra or '(нет)'}
 
         ЯЗЫК — ЖЁСТКО: сами подписи, хэштеги и first comment ТОЛЬКО на английском (рынок
-        {market}) — даже если пожелания Дарьи и этот промпт написаны по-русски. По-русски
-        можно ОДИН блок — «📹 Что в рилсе» (это для Дарьи, а не для публикации).
+        {market}) — даже если пожелания Марии и этот промпт написаны по-русски. По-русски
+        можно ОДИН блок — «📹 Что в рилсе» (это для Марии, а не для публикации).
 
         Пиши на ЖИВОМ английском, без клише и «рекламности», строго в таком формате:
 
@@ -1007,7 +1007,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
         **Звук:** музыка/атмосфера коротко
         **Подпись под пост (EN):** 2-4 строки живого английского
 
-        ЖЁСТКИЕ ПРАВИЛА (правила Дарьи и Дины, действуют всегда):
+        ЖЁСТКИЕ ПРАВИЛА (правила команды, действуют всегда):
         1. Рилс строго ДО 15 СЕКУНД, 3-4 сцены по 3-5 сек.
         2. В КАЖДОЙ сцене обязательны И текст на экране, И озвучка. Порядок блоков в строке
            менять нельзя — его разбирает код при отправке в Notion.
@@ -1097,8 +1097,8 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         "графдизайнер (делает статичные посты / карусели в Figma для Instagram)"
     )
     link_line = (
-        f"- Ссылка от Дарьи для {who} (ИСХОДНИК — фото блогера / референс): {link}"
-        if link else "- Ссылка от Дарьи: (нет)"
+        f"- Ссылка от Марии для {who} (ИСХОДНИК — фото блогера / референс): {link}"
+        if link else "- Ссылка от Марии: (нет)"
     )
     link_rule = (
         f"В ТЗ ОБЯЗАТЕЛЬНО укажи эту ссылку отдельной строкой как исходник, который {who} "
@@ -1160,7 +1160,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
             pass
     user = textwrap.dedent(f"""\
         Напиши ТЗ для {who.upper()} ({role_desc}).
-        Это коммент к ячейке контент-плана — как Дарья раньше оставляла коммент в Google-таблице.
+        Это коммент к ячейке контент-плана — как раньше оставляли коммент в Google-таблице.
 
         Ячейка контент-плана:
         - Бренд: {brand}
@@ -1168,7 +1168,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         - Тема поста (из плана): "{title}"
         - Пиллар: {pillar or '(определи сам по теме)'}
         {link_line}
-        - Доп. пожелания Дарьи: {extra or '(нет)'}
+        - Доп. пожелания Марии: {extra or '(нет)'}
 
         {link_rule}
 
