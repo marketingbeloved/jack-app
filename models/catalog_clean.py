@@ -91,12 +91,14 @@ EXTRA: list[dict] = [
                           "12 single-serve cups × 1.76 oz (4 of each). 88% moisture supports daily water intake. Grain-free & soy-free, added "
                           "vitamins & taurine, with chicken liver and egg yolk. Contains egg and fish. "
                           "Serve on top of a complete meal or on its own as a treat."},
-    {"id": "shreds-in-gravy-tuna-mix", "asin": "",
+    {"id": "shreds-in-gravy-tuna-mix", "asin": "B0HBR2TLHH",
      "title": "Shreds in Gravy Cat Food Topper (Tuna Mix)", "category": "cat topper",
      "flavor": "Tuna Mix",
-     "url": "",
-     "description_short": "Wet cat food topper & lickable treat in one: tender tuna shreds in savory "
-                          "gravy. 3 recipes: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon — 12 single-serve "
-                          "cups × 1.76 oz (4 of each). Serve on top of "
-                          "a complete meal or on its own as a treat."},
+     "url": "https://www.amazon.com/dp/B0HBR2TLHH",
+     "description_short": "Wet cat food topper & lickable treat in one: tender shreds of real tuna in "
+                          "savory gravy. 3 recipes: Tuna Bliss, Tuna & Salmon, Tuna & Shrimp — "
+                          "12 single-serve cups × 1.76 oz (4 of each). 88% moisture supports daily "
+                          "water intake. Grain-free & soy-free, added taurine and vitamins A, B1, B2, "
+                          "B6, D3, E. Contains tuna, fish and egg; some recipes also chicken, salmon "
+                          "or shrimp. Serve on top of a complete meal or on its own as a treat."},
 ]

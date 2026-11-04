@@ -318,7 +318,9 @@ def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
              "Бейдж «Lab tested in the USA» — только для категории [treats]. Shreds in Gravy — "
              "новинка: топпер ПОВЕРХ полноценного корма, не замена ему; 12 чашек × 1.76 oz, "
              "по 4 каждого рецепта. Chicken Mix: Chicken Bliss, Chicken & Rabbit, Chicken & "
-             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon."]
+             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon.",
+             "У «Flea & Tick Support Chews for Dogs» и «… for Dogs & Cats» вкус неизвестен — "
+             "НЕ придумывай его; в ТЗ пиши «вкус: уточнить у Марии (chicken / salmon / beef / bacon)»."]
     for cat, group in by_cat.items():
         lines.append(f"\n[{cat}]")
         for p in group:
