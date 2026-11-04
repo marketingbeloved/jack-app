@@ -138,6 +138,25 @@ def save(post_id: str, text: str, *, title: str = "", pillar: str = "",
         pass
 
 
+def save_many(entries: dict[str, dict]) -> None:
+    """Сохранить сразу много новых ТЗ одним запросом (загрузка плана Threads).
+
+    Только для новых постов: ссылки Notion/ClickUp переносить не из чего. Обычный
+    save() по одному на каждый пост дважды скачивал всю таблицу — 20 постов шли минуту.
+    """
+    if not entries:
+        return
+    sb = _supabase()
+    if sb:
+        _sb_upsert_many(sb, entries)
+    try:
+        data = _file_load_all()
+        data.update(entries)
+        STORE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def delete(post_id: str) -> None:
     sb = _supabase()
     if sb:
@@ -172,6 +191,17 @@ def _sb_upsert(sb, post_id: str, entry: dict, updated: str) -> None:
     h["Prefer"] = "resolution=merge-duplicates"
     requests.post(f"{url}/rest/v1/plan_briefs", headers=h, timeout=15,
                   data=json.dumps([{"post_id": post_id, "data": entry, "updated": updated}]))
+
+
+def _sb_upsert_many(sb, entries: dict[str, dict]) -> None:
+    import requests
+    url, key = sb
+    h = _sb_headers(key)
+    h["Prefer"] = "resolution=merge-duplicates"
+    rows = [{"post_id": pid, "data": e, "updated": e.get("updated", "")}
+            for pid, e in entries.items()]
+    requests.post(f"{url}/rest/v1/plan_briefs", headers=h, timeout=30,
+                  data=json.dumps(rows)).raise_for_status()
 
 
 def _sb_delete(sb, post_id: str) -> None:

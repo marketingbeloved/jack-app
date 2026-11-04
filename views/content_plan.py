@@ -446,7 +446,7 @@ def seed_threads_plan(brand: str, owner: str = "maria") -> int:
 
     seeds = json.loads(_THREADS_SEED.read_text(encoding="utf-8"))
     plan = load_plan(brand)
-    added = 0
+    briefs: dict[str, dict] = {}
     for s in seeds:
         day = plan.setdefault(s["date"], [])
         if any(p.get("title") == s["title"] for p in day):
@@ -463,9 +463,12 @@ def seed_threads_plan(brand: str, owner: str = "maria") -> int:
             text += f"\nКартинка: {s['picture']}"
         if s.get("note"):
             text += f"\n\n_{s['note']}_"
-        plan_briefs.save(pid, text, title=s["title"], pillar=s["rubric"], for_who=owner,
-                         updated=_now())
-        added += 1
+        briefs[pid] = {"text": text.strip(), "link": "", "title": s["title"],
+                       "pillar": s["rubric"], "for": owner, "updated": _now(), "wish": ""}
+    added = len(briefs)
+    # Сначала тексты, потом план: если база не ответит, в календаре не появятся
+    # пустые посты без текста. Один запрос на все 20 вместо 60.
+    plan_briefs.save_many(briefs)
     if added:
         _save_plan(brand, plan)
     return added
@@ -613,7 +616,12 @@ def render():
             st.caption("Темы и готовые тексты постов ляжут в календарь Threads у всей команды. "
                        "Повторное нажатие ничего не задвоит.")
             if st.button("📥 Загрузить 20 постов", key="seed_threads", type="primary"):
-                n = seed_threads_plan(brand)
+                try:
+                    with st.spinner("🐾 Загружаю 20 постов в календарь Threads…"):
+                        n = seed_threads_plan(brand)
+                except Exception as e:
+                    st.error(f"Общая база не ответила, посты не загружены. Нажми ещё раз через минуту. ({e})")
+                    st.stop()
                 st.success(f"Добавлено постов: {n}." if n else "Все 20 постов уже в календаре.")
                 st.rerun()
     elif not plan:
