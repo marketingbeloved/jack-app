@@ -709,8 +709,9 @@ def render():
             n_concepts = st.number_input("How many concepts?", min_value=1, max_value=20, value=3, step=1)
             markets_in = st.multiselect("Markets", ["US", "UK", "CA"], default=["UK"])
         with bc2:
-            from models.products import all_products, short_title as _short
-            all_skus = [_short(p, 60) for p in all_products()]
+            from models.products import brand_products, short_title as _short
+            # Только товары выбранного бренда: раньше у Тани тут был каталог Beloved Pets.
+            all_skus = [_short(p, 60) for p in brand_products(brand)]
             products_in = st.multiselect("Focus products", all_skus, default=all_skus[:3])
         pillars_in = st.multiselect("Pillars", ["Pet Care Tip", "Heartwarming", "Product Highlight", "Community / UGC", "Education", "Meme / POV", "Trend", "Comedy", "Amazon Video", "Faire B2B"])
         context_in = st.text_area("Extra context", placeholder="hooks to avoid, seasonal angles, tone notes…", height=70)

@@ -35,7 +35,7 @@ def _products_for(text: str) -> list:
     ['см. запрос'] (Джек возьмёт из контекста как раньше)."""
     try:
         from models.products import resolve_products, short_title
-        matched = resolve_products(text)
+        matched = resolve_products(text, brand=st.session_state.get("brand", "BelovedPets"))
         if matched:
             return [short_title(p) for p in matched]
     except Exception:

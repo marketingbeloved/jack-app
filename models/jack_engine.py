@@ -169,11 +169,11 @@ def _brand_context(brand: str = "BelovedPets") -> str:
 
     # Catalog — точные названия со вкусами, а не только счётчик по категориям
     try:
-        from models.products import categories, global_compliance as gc_fn, catalog_block, product_rule
-        cats = categories()
+        from models.products import brand_products, global_compliance as gc_fn, catalog_block, product_rule
+        # Счётчик — по каталогу ЭТОГО бренда: раньше Таня видела «58 SKUs» Beloved Pets.
         gc = gc_fn()
         parts.append(
-            f"=== Catalog ===\nTotal {sum(cats.values())} SKUs: {cats}\n"
+            f"=== Catalog ===\nTotal {len(brand_products(brand))} SKUs ({brand})\n"
             f"Global compliance: {json.dumps(gc, ensure_ascii=False)}\n\n"
             + catalog_block(brand) + "\n" + product_rule(brand)
         )
@@ -938,7 +938,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
         team_rules = ""
     try:
         from models.products import resolve_products, catalog_block, product_rule
-        found = resolve_products(product) if product else []
+        found = resolve_products(product, brand=brand) if product else []
         product_block = "\n".join(
             f"- {p.get('title', '')} · {(p.get('description_short') or '')[:220]}" for p in found[:2]
         )

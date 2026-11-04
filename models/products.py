@@ -68,7 +68,33 @@ def _is_tobydic(brand: str) -> bool:
 
 def brand_products(brand: str = "BelovedPets") -> list[dict]:
     """Каталог именно этого бренда. Чужие SKU в промпт не попадают."""
-    return list(TOBYDIC_PRODUCTS) if _is_tobydic(brand) else all_products()
+    return list(TOBYDIC_PRODUCTS) if _is_tobydic(brand) else beloved_products()
+
+
+def beloved_products() -> list[dict]:
+    """Каталог Beloved Pets с чистыми названиями (models/catalog_clean.py) — для промптов
+    и проверки ТЗ. SEO-заголовок Shopify остаётся в `shop_title`. Дубли одного товара
+    (два листинга под одним именем) схлопываются, новинки из EXTRA добавляются."""
+    from models.catalog_clean import EXTRA, NAMES
+
+    raw = _load().get("products", [])
+    if not raw:
+        return []                            # каталог не загрузился — промпт это обработает
+    out, seen = [], set()
+    for p in raw:
+        name = NAMES.get(p.get("shopify_id"))
+        if not name or name[0] in seen:
+            continue
+        seen.add(name[0])
+        out.append({**p, "title": name[0], "category": name[1], "flavor": name[2],
+                    "shop_title": p.get("title", "")})
+    out += [dict(p) for p in EXTRA if p["title"] not in seen]
+    try:
+        from models.products_extend import load_extra
+        out += load_extra()
+    except Exception:
+        pass
+    return out
 
 
 def all_products() -> list[dict]:
@@ -100,8 +126,9 @@ def get_product(product_id: str) -> dict | None:
     return None
 
 
-def list_products(category: str | None = None, search: str | None = None) -> list[dict]:
-    items = all_products()
+def list_products(category: str | None = None, search: str | None = None,
+                  brand: str | None = None) -> list[dict]:
+    items = brand_products(brand) if brand else all_products()
     if category and category != "all":
         items = [p for p in items if p.get("category") == category]
     if search:
@@ -166,10 +193,12 @@ _PRODUCT_HINTS = {
     "шерст": "skin", "кож": "skin", "skin": "skin", "coat": "coat",
     "uti": "uti", "мочев": "urinary", "цистит": "urinary", "urinary": "urinary",
     "spray": "spray", "спрей": "spray",
+    "топпер": "shreds", "topper": "shreds", "шредс": "shreds", "shreds": "shreds",
+    "gravy": "shreds", "соус": "shreds", "влажн": "shreds",
 }
 
 
-def resolve_products(text: str, limit: int = 4) -> list[dict]:
+def resolve_products(text: str, limit: int = 4, brand: str = "BelovedPets") -> list[dict]:
     """По описанию задачи (рус/англ) найти товары в каталоге.
 
     «салфетки» → Eye Wash Wipes, «успокоительное» → Calming Chews и т.п.
@@ -183,7 +212,7 @@ def resolve_products(text: str, limit: int = 4) -> list[dict]:
             terms.append(term)
     out, seen = [], set()
     for term in terms:
-        for p in list_products(search=term):
+        for p in list_products(search=term, brand=brand):
             pid = p.get("id")
             if pid and pid not in seen:
                 seen.add(pid)
@@ -209,6 +238,8 @@ def flavor_of(p: dict) -> str:
     Форматы, которые реально встречаются: «… (Salmon (for Cats))», «… (Beef)»,
     «… with Chicken Flavor …», «… Bacon Flavor», «… Tuna + Chicken Mix 40 Sticks».
     """
+    if isinstance(p, dict) and p.get("flavor"):
+        return p["flavor"]                   # чистый каталог знает вкус точно
     title = p.get("title", "") if isinstance(p, dict) else str(p)
     m = re.search(r"\(([^()]*(?:\([^()]*\))?[^()]*)\)\s*$", title)
     if m:
@@ -271,7 +302,7 @@ def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
                      "у Tobydic только эти 7 позиций.")
         return "\n".join(lines)
 
-    items = all_products()[:limit]
+    items = brand_products(brand)[:limit]
     if not items:
         # Каталог не загрузился (нет файла и нет копии в общей базе). Без списка Джек
         # гарантированно выдумает названия — поэтому запрещаем называть SKU вообще.
@@ -283,16 +314,23 @@ def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
     for p in items:
         by_cat.setdefault(str(p.get("category") or "Прочее"), []).append(p)
 
-    lines = ["=== БИБЛИОТЕКА ТОВАРОВ (единственный источник названий) ==="]
-    for cat, items in by_cat.items():
+    lines = ["=== БИБЛИОТЕКА ТОВАРОВ BELOVED PETS (единственный источник названий) ===",
+             "Бейдж «Lab tested in the USA» — только для категории [treats]. Shreds in Gravy — "
+             "новинка: топпер ПОВЕРХ полноценного корма, не замена ему; 12 чашек × 1.76 oz, "
+             "по 4 каждого рецепта. Chicken Mix: Chicken Bliss, Chicken & Rabbit, Chicken & "
+             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon."]
+    for cat, group in by_cat.items():
         lines.append(f"\n[{cat}]")
-        for p in items:
+        for p in group:
             fl = flavor_of(p)
-            lines.append(f"  • {p.get('title','')}" + (f"   ← ВКУС: {fl}" if fl else ""))
+            in_name = fl and _norm(fl) in _norm(p.get("title", ""))
+            lines.append(f"  • {p.get('title','')}" + (f"   ← ВКУС: {fl}" if fl and not in_name else ""))
+    lines.append("СТРОГО ЗАПРЕЩЕНО называть товары TOBYDIC и любых других брендов, а также "
+                 "товары и вкусы, которых нет в этом списке.")
 
     # Семейства с несколькими вкусами — самая частая ошибка: назвать «чуйбы» без вкуса.
     fams: dict[str, set] = {}
-    for p in all_products():
+    for p in items:
         fl = flavor_of(p)
         if not fl:
             continue
@@ -314,8 +352,8 @@ def product_rule(brand: str = "BelovedPets") -> str:
         "   не выдумывай ни названий, ни линеек, ни форматов упаковки.\n"
         "2. В ТЗ обязательна строка **Товар:** с ПОЛНЫМ названием из библиотеки, СЛОВО В СЛОВО,\n"
         "   вместе со скобками и размером. Не сокращай, не переводи, не переставляй слова.\n"
-        "3. ВКУС/вариант обязателен, если он есть у товара: «(Salmon (for Cats))», «(Beef)»,\n"
-        "   «with Chicken Flavor». Формулировки вроде «чуйбы флиантик» — брак.\n"
+        "3. ВКУС/вариант обязателен, если он есть у товара: «(Chicken)», «(Bacon)»,\n"
+        "   «(Chicken Mix)» / «(Tuna Mix)». Формулировки вроде «чуйбы флиантик» — брак.\n"
         "4. Если у линейки несколько вкусов — выбери ОДИН и назови его явно. «Любой вкус» и\n"
         "   «на выбор» в ТЗ не пишем: креатор должен знать, какую пачку ставить в кадр.\n"
         "5. Не знаешь, какой товар подходит теме — возьми ближайший из библиотеки и скажи об\n"
