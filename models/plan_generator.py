@@ -330,7 +330,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
         if s["format"] == "blogger_photo":
             slot_lines.append(
                 f'- {s["date"]} ({s["weekday"]}) — ЗАФИКСИРОВАНО: «фото от блогера», '
-                f'исполнитель {who(s["owner"])}. title строго "фото от блогера", не меняй.')
+                f'исполнитель {who(s["owner"])}. title: "фото от блогера · <товар в 2-4 словах>".')
         else:
             slot_lines.append(
                 f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
@@ -368,18 +368,21 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 Правила:
 - Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
   не ставь три рилса подряд, чередуй carousel / animation / reel / lifestyle.
-- ВАЖНО ПРО «фото от блогера». Исходник выбирает Мария руками на Google Диске и присылает
-  ссылку исполнителю. Ты НЕ знаешь, что на этом фото, и придумывать НЕЛЬЗЯ: не пиши, какое
-  там животное, товар, поза или обстановка. В `title` пиши ровно «фото от блогера».
-  В `script` дай только то, что применимо к ЛЮБОМУ фото блогера: первой строкой
-  «Исходник: ссылка на фото от Марии (выберет с Диска)», затем overlay-текст на английском,
-  кадрирование 4:5, тон обработки и что подпись/логотип не должны перекрывать питомца.
-  `hook` для такого слота — это текст overlay, а не описание кадра.
-- `hook` — это первые 2 секунды рилса или первый экран карусели, на АНГЛИЙСКОМ, готовый к съёмке.
-- `script` — ГОТОВОЕ ТЗ исполнителю в markdown. Для видео: сцены с таймингом
-  («0-3 сек — что в кадре (РУС) · overlay "English" · voiceover "English"»).
-  Для карусели: слайды («Слайд 1 — что в кадре · overlay "English copy"»).
-  Для фото от блогера: что за кадр, какой overlay-текст, что выделить.
+- ВАЖНО ПРО «фото от блогера». Ты выбираешь, КАКОЙ ТОВАР показать, а фото с этим товаром
+  Мария подберёт на Диске сама. Что на фото (животное, поза, обстановка) — не придумывай.
+  `title` = «фото от блогера · <товар коротко, 2-4 слова>», напр.
+  «фото от блогера · Hip & Joint Chews».
+- `hook` — на АНГЛИЙСКОМ: первые 2 секунды видео или надпись на первом экране графики.
+- `script` — ТЗ исполнителю. Айдентика, шрифты, цвета, пропорции, кадрирование и
+  логотип исполнителям УЖЕ ИЗВЕСТНЫ — про них НЕ пиши ни слова. Никаких советов по съёмке
+  и обработке. Только то, что меняется от поста к посту:
+  • ГРАФИКА (Вика: фото от блогера, carousel, promo) — ТОЛЬКО надпись на креативе, на
+    английском. Одна строка для одиночного креатива; для карусели — по строке на экран:
+    «1: "..."», «2: "..."». Больше ничего: ни описания кадра, ни композиции.
+  • ВИДЕО (Дина: reel, animation, lifestyle) — первой строкой «Идея: <1 фраза по-русски>»,
+    дальше только сцены, каждая одной строкой строго в виде
+    «- 0-3 сек — что в кадре (РУС, коротко) · на экране "English" · озвучка "English"»
+    (озвучку можно пропустить, если её нет). 2-4 сцены. Без вступлений и примечаний.
 - `caption` — подпись под пост на английском, 2-4 строки + CTA. Хэштеги — В КОНЦЕ подписи,
   НЕ БОЛЬШЕ {MAX_HASHTAGS} штук на пост (лишние отрежутся автоматически).
 - `why` — одной фразой, на чём основано решение: факт из истории/цифр ИЛИ какую новую
@@ -501,11 +504,15 @@ def _normalise(posts: list[dict], slots: list[dict],
         if fmt != "blogger_photo" and team_roles:
             owner = owner_for_format(fmt, team_roles, owner)
 
+        title = (post.get("title") or "").strip()[:120] or "(без темы)"
+        if fmt == "blogger_photo":
+            title = _blogger_title(title, post.get("product") or "")
+
         out.append({
             "date": slot["date"],
             "iso": slot["iso"],
             "weekday": slot["weekday"],
-            "title": (post.get("title") or "").strip()[:120] or "(без темы)",
+            "title": title,
             "type": ptype,
             "format": fmt,
             "owner": owner,
@@ -517,6 +524,18 @@ def _normalise(posts: list[dict], slots: list[dict],
             "why": (post.get("why") or "").strip(),
         })
     return out
+
+
+def _blogger_title(title: str, product: str) -> str:
+    """«фото от блогера · <товар коротко>» — чтобы в календаре было видно, что за товар.
+
+    Анализ прошлых месяцев ищет рубрику по началу «фото от блогера», хвост ему не мешает.
+    """
+    tail = re.sub(r"^\s*фото\s*(?:от\s*)?блогер[а-я]*\s*[·:—\-]*\s*", "", title, flags=re.I).strip()
+    if not tail and product and not product.startswith("⚠️"):
+        tail = re.sub(r"^Beloved Pets\s+", "", product.split(" - ")[0].split(" (")[0]).strip()
+        tail = " ".join(tail.split()[:4])
+    return f"фото от блогера · {tail}" if tail else "фото от блогера"
 
 
 def _clean_md(text: str) -> str:
@@ -566,17 +585,45 @@ _FORMAT_RU = {"reel": "Reel / видео", "carousel": "Карусель", "anim
               "promo": "Промо"}
 
 
+_GRAPHIC_FORMATS = {"blogger_photo", "carousel", "promo"}
+
+
 def _brief_text(p: dict) -> str:
-    """Assemble the stored ТЗ exactly as the team reads it in a plan cell."""
-    parts = [f'**Формат:** {_FORMAT_RU.get(p.get("format",""), p.get("format",""))}']
+    """Assemble the stored ТЗ exactly as the team reads it in a plan cell.
+
+    Решение Марии (2026-11-11): ТЗ Вике — только вид креатива, товар, надпись на креативе
+    и подпись. ТЗ Дине — короткая структура без айдентики и пропорций (они ей известны).
+    Обоснование «почему в плане» видно Марии в черновике, в ТЗ исполнителю его нет.
+    """
+    fmt = p.get("format", "")
+    kind = _FORMAT_RU.get(fmt, fmt)
+    script = (p.get("script") or "").strip()
+    caption = (p.get("caption") or "").strip()
+
+    if fmt in _GRAPHIC_FORMATS:
+        text_on = script or (f'"{p["hook"]}"' if p.get("hook") else "")
+        parts = [f"**Вид креатива:** {kind}"]
+        if p.get("product"):
+            parts.append(f'**Товар:** {p["product"]}')
+        if text_on:
+            parts.append(f"**Надпись на креативе:**\n{text_on}")
+        if caption:
+            parts.append(f"**Подпись для поста (EN):**\n{caption}")
+        return "\n\n".join(parts).strip()
+
+    idea = ""
+    m = re.match(r"^\s*\**\s*Идея\s*:?\**\s*:?\s*(.+?)\s*(?:\n|$)", script)
+    if m:
+        idea, script = m.group(1).strip(" *"), script[m.end():].strip()
+    parts = [f"**Формат:** {kind}"]
     if p.get("product"):
-        parts.append(f'**Товар в кадре:** {p["product"]}')
+        parts.append(f'**Товар:** {p["product"]}')
+    if idea:
+        parts.append(f"**Идея:** {idea}")
     if p.get("hook"):
-        parts.append(f'**Хук (первые 2 сек / первый экран):** {p["hook"]}')
-    if p.get("script"):
-        parts.append(p["script"])
-    if p.get("caption"):
-        parts.append(f'**Подпись под пост (EN):**\n{p["caption"]}')
-    if p.get("why"):
-        parts.append(f'_Почему этот пост в плане: {p["why"]}_')
+        parts.append(f'**Хук (0-2 сек):** {p["hook"]}')
+    if script:
+        parts.append(f"**Сцены:**\n{script}")
+    if caption:
+        parts.append(f"**Подпись под пост (EN):**\n{caption}")
     return "\n\n".join(parts).strip()
