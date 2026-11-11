@@ -91,6 +91,18 @@ def product_url(name: str, brand: str = "BelovedPets") -> str:
     return (p or {}).get("url", "")
 
 
+def other_brand_product(name: str, brand: str = "BelovedPets") -> dict | None:
+    """Товар ДРУГОГО бренда с таким названием (None — чужим он не является).
+
+    Правило Марии (2026-11-11): бренды не смешиваются — в контенте TOBYDIC только товары
+    TOBYDIC, в Beloved Pets — только Beloved Pets.
+    """
+    other = "BelovedPets" if _is_tobydic(brand) else "TOBYDIC"
+    if find_exact(name, brand):
+        return None
+    return find_exact(name, other) or find_mentioned(name, other)
+
+
 def attach_link(text: str, brand: str = "BelovedPets") -> str:
     """Дописать ссылку Amazon в строку «**Товар:** …», если Джек её не поставил."""
     def fix(m: "re.Match") -> str:
@@ -382,6 +394,10 @@ def validate_products(text: str, brand: str = "BelovedPets") -> list[str]:
     if named.lower().startswith(("вся линейка", "бренд", "нет", "—")):
         return problems                      # бренд-ТЗ без конкретного SKU — это законно
     p = find_exact(named, brand) or find_mentioned(named, brand)
+    if not p and other_brand_product(named, brand):
+        problems.append(f"«{named[:70]}» — товар другого бренда; бренды не смешиваем, "
+                        f"бери только из библиотеки {brand}")
+        return problems
     if not p:
         problems.append(f"товара «{named[:70]}» нет в библиотеке — название выдумано или искажено")
         return problems

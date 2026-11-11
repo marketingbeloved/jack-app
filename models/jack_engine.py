@@ -211,7 +211,8 @@ def _system_prompt() -> str:
         - Competitors I watch: Pet Honesty (premium-natural · main peer), Native Pet (vet-developed
           · most science-y), Zesty Paws (mass-market · we go premium NOT them), Bark Botanica
           (adaptogens · we steal their ingredient deep-dive format), Finn (premium minimal)
-        - Catalogue: 58 SKUs · 39 treats / 15 supplements / 4 sprays. I know them cold.
+        - Catalogue: only live Amazon US listings — the exact list for the CURRENT brand
+          comes below in «БИБЛИОТЕКА ТОВАРОВ». I never use products from memory.
         - Brand sells via Shopify (DTC), Amazon US/UK/CA, TikTok Shop, Chewy
         - Audience: 25-45 pet parents, premium-natural seekers, TikTok-search natives
 
@@ -273,10 +274,14 @@ def _system_prompt() -> str:
 
         DUAL-BRAND CONTEXT:
         - BELOVEDPETS — Maria leads · USP "Supplement NOT a Medicine" · premium-natural ·
-          58 SKUs · live: 12.3K IG followers, 41.6K reel views/month (May 2026)
+          live: 12.3K IG followers, 41.6K reel views/month (May 2026)
         - TOBYDIC — Maria leads · separate brand · 4.3K IG followers, 5.8K reel views/month
           · same compliance rules apply (no medical claims), tone may differ slightly per
           Maria's direction
+        - ⛔ BRANDS NEVER MIX (Maria's rule): a TOBYDIC plan / brief / caption uses ONLY the 7
+          TOBYDIC products; a BelovedPets one uses ONLY BelovedPets products. Never put a
+          BelovedPets SKU (treats, chews, Relaxiv, Shreds, drops…) into TOBYDIC content and
+          vice versa — even if it fits the topic. No fitting product → «вся линейка».
 
         BELOVED PETS AMAZON BRAND STORES (use ONLY when Maria explicitly asks for Amazon CTA):
         - US: https://www.amazon.com/stores/BelovedPets/page/E3FFFE05-38E4-4AB3-85FF-FC461876EE18

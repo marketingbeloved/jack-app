@@ -122,7 +122,8 @@ def brief_has_product(text: str) -> bool:
         return True
     try:
         from models.products import resolve_products
-        return bool(resolve_products(text))
+        import streamlit as st
+        return bool(resolve_products(text, brand=st.session_state.get("brand", "BelovedPets")))
     except Exception:
         return False
 

@@ -11,8 +11,13 @@
 Не вошли (сознательно):
   • MaxBuddy (B0DT4LMXVM, B0DHHKD25C, B0DHHK2YYQ) — чужой бренд;
   • UK / Canada ASIN (B0GLQBDMNX, B0FXXQ3769, B0GK91FSWK, B0GK9278G1, B0GK98T99C) — на .com 404;
-  • Dewormer «red» B097KTGTQW — в таблице помечен «на Амазон скрыт»;
-  • Neoterica Protecto 4 (5-22, 23-45, 89-132 lb) и Calming Collar for Dogs B01FSFY624 — 404.
+  • Neoterica Protecto 4 — все размеры: чужой бренд, Мария решила убрать (2026-11-11);
+  • Calming Collar for Dogs B01FSFY624 — 404.
+Dewormer «red» B097KTGTQW в таблице помечен «скрыт», но на Amazon живой — Мария вернула.
+Ссылки в самой таблице местами перепутаны (Eye Cleaner 100/50 ml, Rawhide bones, Tuna 40) —
+ориентир всегда столбец ASIN, ссылки строим из него.
+
+⛔ Бренды не смешиваются: BELOVED — только для Beloved Pets, TOBYDIC — только для TOBYDIC.
 
 Новый товар на Amazon → добавь строку сюда. Чего здесь нет, того для Джека не существует.
 
@@ -31,6 +36,7 @@ BELOVED: list[tuple[str, str, str, str, int | None]] = [
     ("B0B56PBZJS", "Throat & Respiratory Support Drops", "supplement", "", 7378818826433),
     ("B0C49B8SK9", "Multivitamin 21-in-1 Drops with Glucosamine & Cranberry (60 ml)", "supplement", "", 7728773136577),
     ("B0B56LLBBB", "Hemp Oil Drops with Multivitamin", "supplement", "", 7378813812929),
+    ("B097KTGTQW", "Herbal Intestinal Cleanse Drops with Wormwood & Black Walnut", "supplement", "", 10911672238273),
     ("B0BDNLR81R", "Herbal Intestinal Cleanse Drops with Probiotic", "supplement", "", 7543010132161),
     ("B0CP8CYVGD", "Herbiotic Complex Drops", "supplement", "", 10454881632449),
     ("B0CP8BF4SG", "Probiotics & Prebiotics with Enzymes Drops", "supplement", "", 10454875439297),
@@ -83,7 +89,6 @@ BELOVED: list[tuple[str, str, str, str, int | None]] = [
     ("B019NNTJ8S", "Ear Cleaner Drops", "eye & ear", "", 10456971182273),
     # ── Блохи и клещи (наружные) ──
     ("B00MN4ATVG", "Flea & Tick Spot-On Drops for Dogs & Cats (3 Pack)", "flea & tick", "", 7240694563009),
-    ("B09DYRFMJV", "Neoterica Protecto 4 Flea & Tick Spot-On for Dogs (45-89 lb)", "flea & tick", "", None),
     ("B07SB5BD4W", "Flea & Tick Home Spray", "flea & tick", "", 7106558918849),
     ("B01JQHKVPQ", "Flea & Tick Collar for Cats (1 Pack)", "flea & tick", "", 7288670716097),
     ("B01IU8U7B0", "Flea & Tick Collar for Cats (2 Pack)", "flea & tick", "", 7288670716097),

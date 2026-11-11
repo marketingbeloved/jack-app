@@ -455,10 +455,13 @@ def _check_product(name: str, brand: str) -> str:
                                             "n/a", "none", "any", "любой")):
         return name
     try:
-        from models.products import brand_products, find_exact, find_mentioned
+        from models.products import (brand_products, find_exact, find_mentioned,
+                                     other_brand_product)
         if not brand_products(brand):
             return name                      # каталог не загрузился — сверять не с чем
         p = find_exact(name, brand) or find_mentioned(name, brand)
+        if not p and other_brand_product(name, brand):
+            return f"⚠️ товар другого бренда, заменить: {name}"
     except Exception:
         return name
     if p:
