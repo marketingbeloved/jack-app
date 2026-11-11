@@ -113,7 +113,7 @@ def render() -> None:
 
 def draft_key(brand: str, year: int, month: int) -> str:
     """Ключ готового черновика месяца в общей базе (его кладёт Claude вне сайта)."""
-    return f"month_draft_{brand}_{year}-{month:02d}"
+    return f"month_draft_{brand.lower()}_{year}-{month:02d}"
 
 
 def _offer_saved_draft(brand: str, year: int, month: int, month_label: str) -> None:
