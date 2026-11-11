@@ -1232,8 +1232,13 @@ def threads_post(title: str, pillar: str = "", brand: str = "BelovedPets", extra
         system += _insights(brand)
     except Exception:
         pass
+    if brand.upper() == "TOBYDIC":
+        account = ("TOBYDIC (Instagram @tobydic_brand_). Голос: тёплый, честный — «herbal isn't instant "
+                   "magic», заботливый, но не врач. Две линии: приюты и adoption + ежедневная забота")
+    else:
+        account = "@beloved_pets_brand"
     user = textwrap.dedent(f"""\
-        Напиши ГОТОВЫЙ текст поста для Threads @beloved_pets_brand (рынок US).
+        Напиши ГОТОВЫЙ текст поста для Threads {account} (рынок US).
 
         Тема из календаря: "{title}"
         Рубрика: {pillar or '(определи сам по теме)'}
@@ -1248,10 +1253,11 @@ def threads_post(title: str, pillar: str = "", brand: str = "BelovedPets", extra
         - Симптомы — одна строка «call your vet», без советов по лечению.
         - Можно мостик в Instagram: «the best ones go on our Instagram» — без ссылок.
         - Запрещено: cure / treat / heal / relief / prevent / UTI / infection / anti-anxiety /
-          FDA / 100% safe / guaranteed / clinically proven / vet-developed / Made in USA.
+          FDA / 100% safe / guaranteed / clinically proven / vet-developed / Made in USA /
+          dewormer / anti-parasitic / kidney.
 
         Выдай только текст поста на английском (без кавычек, без вступлений, без ``` ).
-        Последней строкой на русском: «Тег: Dogs of Threads / Cats of Threads / Pet Parents» — один, по теме.
+        Последней строкой на русском: «Тег: Dogs of Threads / Cats of Threads / Pet Parents / Rescue Pets» — один, по теме.
     """)
     out = call_claude(user, system, timeout=120)
     if out.startswith("__ERROR__"):

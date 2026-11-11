@@ -369,7 +369,16 @@ _THREADS_RUBRIC_FMT = (("фото", "photo"), ("игра", "photo"), ("проп�
                        ("ветка", "thread"), ("вопрос", "question"), ("мнение", "opinion"),
                        ("опрос", "opinion"), ("разговор", "opinion"), ("истори", "story"),
                        ("сообществ", "story"), ("праздник", "story"))
-_THREADS_SEED = Path(__file__).resolve().parent.parent / "models" / "threads_seed.json"
+_THREADS_SEEDS = {  # бренд → (файл плана Threads, период)
+    "BelovedPets": ("threads_seed.json", "09.11–04.12"),
+    "Tobydic": ("threads_seed_tobydic.json", "16.11–11.12"),
+}
+
+
+def _threads_seed(brand: str) -> Path | None:
+    name = _THREADS_SEEDS.get(brand, ("",))[0]
+    f = Path(__file__).resolve().parent.parent / "models" / name if name else None
+    return f if f and f.exists() else None
 
 
 def _channel() -> str:
@@ -434,7 +443,7 @@ def add_plan_post(brand: str, date_key: str, title: str, ptype: str, pillar: str
 
 
 def seed_threads_plan(brand: str, owner: str = "maria") -> int:
-    """Загрузить 20 постов плана Threads (09.11–04.12) в календарь Threads.
+    """Загрузить 20 постов плана Threads бренда (файл из _THREADS_SEEDS) в календарь Threads.
 
     Тексты постов из плана ложатся сразу в ячейки как «Текст поста» — их остаётся
     проверить и опубликовать. Повторное нажатие не дублирует: тема на ту же дату
@@ -444,7 +453,7 @@ def seed_threads_plan(brand: str, owner: str = "maria") -> int:
     import uuid
     from models import plan_briefs
 
-    seeds = json.loads(_THREADS_SEED.read_text(encoding="utf-8"))
+    seeds = json.loads(_threads_seed(brand).read_text(encoding="utf-8"))
     plan = load_plan(brand)
     briefs: dict[str, dict] = {}
     for s in seeds:
@@ -611,8 +620,9 @@ def render():
         st.session_state["_briefs_synced"] = True
     briefs = plan_briefs.load_all()
 
-    if threads and brand == "BelovedPets" and _THREADS_SEED.exists():
-        with st.expander("📥 План Threads из ресёрча — 20 постов, 09.11–04.12", expanded=not plan):
+    if threads and _threads_seed(brand):
+        with st.expander(f"📥 План Threads из ресёрча — 20 постов, {_THREADS_SEEDS[brand][1]}",
+                         expanded=not plan):
             st.caption("Темы и готовые тексты постов ляжут в календарь Threads у всей команды. "
                        "Повторное нажатие ничего не задвоит.")
             if st.button("📥 Загрузить 20 постов", key="seed_threads", type="primary"):
