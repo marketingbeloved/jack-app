@@ -593,8 +593,9 @@ def render():
 
     if threads:
         st.markdown(f"# 🧵 Threads · {brand} · {view_label}")
+        shop = "Amazon" if brand.upper() == "TOBYDIC" else "Shopify"
         st.caption("Threads = узнаваемость, без продаж: ни товаров, ни цен, ни ссылок на магазин. "
-                   "Путь: Threads → Instagram → Shopify. 5 постов в неделю, пн–пт. "
+                   f"Путь: Threads → Instagram → {shop}. 5 постов в неделю, пн–пт. "
                    "В ячейке — готовый текст поста; публикуем только после «да».")
         legend = (_legend_pill("engaging", "вопрос, ветка-польза, история, опрос")
                   + _legend_pill("viral", "фото-ветка, игра, праздник"))
