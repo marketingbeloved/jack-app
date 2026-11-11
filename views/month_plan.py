@@ -189,7 +189,8 @@ def _preview(brand: str, owners: dict) -> None:
             if p.get("hook"):
                 st.markdown(f'**Хук:** {p["hook"]}')
             if p.get("product"):
-                st.caption(f'Товар: {p["product"]} · пиллар: {p.get("pillar") or "—"} · '
+                link = f' · [Amazon]({p["product_url"]})' if p.get("product_url") else ""
+                st.caption(f'Товар: {p["product"]}{link} · пиллар: {p.get("pillar") or "—"} · '
                            f'категория: {TYPE_COLORS.get(p["type"], {}).get("label") or p["type"]}')
             if p.get("script"):
                 st.markdown(p["script"])

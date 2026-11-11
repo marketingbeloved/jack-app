@@ -1033,7 +1033,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
         """
         problems = check_brief(out, brand)
         if not problems:
-            return out
+            return _with_link(out, brand)
         fix = ("Вот ТЗ, которое ты написал:\n\n" + out + "\n\nОно забраковано. Претензии:\n"
                + "\n".join(f"- {p}" for p in problems)
                + "\n\n" + catalog + "\n\nПерепиши ТЗ целиком, устранив КАЖДУЮ претензию. "
@@ -1042,7 +1042,7 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
         if second.startswith("⚠️"):
             return out
         if not check_brief(second, brand):
-            return second
+            return _with_link(second, brand)
         return ("⚠️ Проверка ТЗ: " + "; ".join(check_brief(second, brand))
                 + "\n(поправь вручную)\n\n" + second)
 
@@ -1180,7 +1180,16 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     problems = check_brief(out, brand)
     if problems:
         out = _retry_with_problems(user, system, out, problems, brand)
-    return out
+    return _with_link(out, brand)
+
+
+def _with_link(text: str, brand: str) -> str:
+    """Ссылка на листинг Amazon к товару в ТЗ (решение Марии 2026-11-11)."""
+    try:
+        from models.products import attach_link
+        return attach_link(text, brand)
+    except Exception:
+        return text
 
 
 # ─── Threads — готовый текст поста, а не ТЗ ─────────────────────────────────

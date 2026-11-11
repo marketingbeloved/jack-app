@@ -42,24 +42,16 @@ def _load():
     return {"products": [], "global_compliance": {}, "category_knowledge_base": {}}
 
 
-# TOBYDIC — 7 SKU, все herbal liquid drops 2 oz. Источник: Контент-завод,
-# knowledge/products/tobydic.md (имена — те, под которыми товар идёт в контенте).
-TOBYDIC_PRODUCTS = [
-    {"id": "TURI2OZ", "title": "TOBYDIC Urinary Tract Support", "category": "supplement",
-     "description_short": "Herbal drops: cranberry, D-mannose — urinary tract & bladder support"},
-    {"id": "TYEAST2OZ", "title": "TOBYDIC Yeast & Skin Support", "category": "supplement",
-     "description_short": "Herbal drops with probiotics — skin & coat care, healthy immune function"},
-    {"id": "TDEWO2OZ", "title": "TOBYDIC DEWO Herbal Intestinal Cleanse", "category": "supplement",
-     "description_short": "Herbal drops: pumpkin seed, wormwood, black walnut — healthy intestinal function"},
-    {"id": "TDEWOP2OZ", "title": "TOBYDIC DEWO + Probiotics", "category": "supplement",
-     "description_short": "DEWO herbal blend + probiotic & prebiotic — healthy intestinal function"},
-    {"id": "TCOUG2OZ", "title": "TOBYDIC Throat & Respiratory Support", "category": "supplement",
-     "description_short": "Herbal drops: elderberry, echinacea, mullein — throat, respiratory & immune support"},
-    {"id": "TMULTI2OZ", "title": "TOBYDIC Multivitamin 21-in-1", "category": "supplement",
-     "description_short": "Daily multivitamin drops — immune, joint, skin & coat support"},
-    {"id": "TFTMUL2OZ", "title": "TOBYDIC Flea & Tick Support", "category": "supplement",
-     "description_short": "Oral herbal drops — flea & tick season support, skin & coat (never 'kills/prevents')"},
-]
+# TOBYDIC — 7 SKU, все herbal liquid drops 2 oz. Список и ASIN — только из Amazon
+# (models/amazon_catalog.py, решение Марии 2026-11-11).
+def _tobydic() -> list[dict]:
+    from models.amazon_catalog import TOBYDIC, url
+    return [{"id": asin, "asin": asin, "url": url(asin), "title": name,
+             "category": "supplement", "flavor": "", "description_short": desc}
+            for asin, name, desc in TOBYDIC]
+
+
+TOBYDIC_PRODUCTS = _tobydic()
 
 
 def _is_tobydic(brand: str) -> bool:
@@ -72,43 +64,55 @@ def brand_products(brand: str = "BelovedPets") -> list[dict]:
 
 
 def beloved_products() -> list[dict]:
-    """Каталог Beloved Pets с чистыми названиями (models/catalog_clean.py) — для промптов
-    и проверки ТЗ. SEO-заголовок Shopify остаётся в `shop_title`. Дубли одного товара
-    (два листинга под одним именем) схлопываются, новинки из EXTRA добавляются."""
-    from models.catalog_clean import EXTRA, NAMES
+    """Каталог Beloved Pets = только актуальные листинги Amazon US (models/amazon_catalog.py).
 
-    raw = _load().get("products", [])
-    if not raw:
-        return []                            # каталог не загрузился — промпт это обработает
-    out, seen = [], set()
-    for p in raw:
-        name = NAMES.get(p.get("shopify_id"))
-        if not name or name[0] in seen:
-            continue
-        seen.add(name[0])
-        out.append({**p, "title": name[0], "category": name[1], "flavor": name[2],
-                    "shop_title": p.get("title", "")})
-    out += [dict(p) for p in EXTRA if p["title"] not in seen]
-    try:
-        from models.products_extend import load_extra
-        out += load_extra()
-    except Exception:
-        pass
+    Решение Марии 2026-11-11: товары и названия — только оттуда. Shopify-выгрузка нужна
+    лишь для состава и описания ТОГО ЖЕ товара (связь по shopify_id); товаров только из
+    Shopify и добавленных в чате больше нет. Работает и без выгрузки — тогда без описаний.
+    """
+    from models.amazon_catalog import BELOVED, DESCRIPTIONS, url
+
+    shop = {p.get("shopify_id"): p for p in _load().get("products", [])}
+    out = []
+    for asin, name, cat, flavor, sid in BELOVED:
+        base = dict(shop.get(sid) or {}) if sid else {}
+        shop_title = base.pop("title", "")
+        base.pop("url", None)
+        out.append({**base, "id": asin, "asin": asin, "url": url(asin), "title": name,
+                    "category": cat, "flavor": flavor, "shop_title": shop_title,
+                    "description_short": DESCRIPTIONS.get(asin)
+                    or base.get("description_short", "")})
     return out
 
 
+def product_url(name: str, brand: str = "BelovedPets") -> str:
+    """Ссылка на Amazon для товара по его названию из каталога ('' — не нашли)."""
+    p = find_exact(name, brand) or find_mentioned(name, brand)
+    return (p or {}).get("url", "")
+
+
+def attach_link(text: str, brand: str = "BelovedPets") -> str:
+    """Дописать ссылку Amazon в строку «**Товар:** …», если Джек её не поставил."""
+    def fix(m: "re.Match") -> str:
+        line = m.group(0)
+        if "amazon." in line:
+            return line
+        named = m.group(2).strip().strip("*").split("·")[0].strip()
+        link = product_url(named, brand)
+        return f"{line.rstrip()} · {link}" if link else line
+    return re.sub(r"^(\s*\*\*Товар(?: в кадре)?:\*\*)\s*(.+)$", fix, text or "", flags=re.M)
+
+
 def all_products() -> list[dict]:
-    """Merge Content Factory's 58 SKUs + extras added by Darya via chat."""
-    base = _load().get("products", [])
-    try:
-        from models.products_extend import load_extra
-        return base + load_extra()
-    except Exception:
-        return base
+    """Все товары обоих брендов — только актуальные листинги Amazon (amazon_catalog.py)."""
+    return beloved_products() + list(TOBYDIC_PRODUCTS)
 
 
-def categories() -> dict[str, int]:
-    return _load().get("categories_count", {})
+def categories(brand: str = "BelovedPets") -> dict[str, int]:
+    out: dict[str, int] = {}
+    for p in brand_products(brand):
+        out[p.get("category", "?")] = out.get(p.get("category", "?"), 0) + 1
+    return out
 
 
 def global_compliance() -> dict:
@@ -286,18 +290,18 @@ def find_mentioned(title: str, brand: str = "BelovedPets") -> dict | None:
     return None
 
 
-def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
+def catalog_block(brand: str = "BelovedPets", limit: int = 150) -> str:
     """ТОЧНЫЕ названия товаров для промпта — целиком, со вкусом, без обрезки.
 
     Раньше в промпт уходил `short_title(..., 50)`, и хвост «(Salmon (for Cats))»
     отрезался вместе со вкусом — Джек про вкус и не знал.
     """
     if _is_tobydic(brand):
-        lines = ["=== БИБЛИОТЕКА ТОВАРОВ TOBYDIC (единственный источник названий, 7 SKU) ===",
+        lines = ["=== БИБЛИОТЕКА ТОВАРОВ TOBYDIC — актуальные листинги Amazon (7 SKU) ===",
                  "Все — herbal liquid drops 2 oz / 60 ml для собак и кошек, с 12 недель. "
                  "Фокус ~70% контента: Urinary, Multivitamin 21-in-1, Yeast & Skin."]
         for p in TOBYDIC_PRODUCTS:
-            lines.append(f"  • {p['title']}   — {p['description_short']}")
+            lines.append(f"  • {p['title']}   — {p['description_short']} · {p['url']}")
         lines.append("СТРОГО ЗАПРЕЩЕНО называть товары Beloved Pets и любых других брендов — "
                      "у Tobydic только эти 7 позиций.")
         return "\n".join(lines)
@@ -314,19 +318,20 @@ def catalog_block(brand: str = "BelovedPets", limit: int = 80) -> str:
     for p in items:
         by_cat.setdefault(str(p.get("category") or "Прочее"), []).append(p)
 
-    lines = ["=== БИБЛИОТЕКА ТОВАРОВ BELOVED PETS (единственный источник названий) ===",
+    lines = ["=== БИБЛИОТЕКА ТОВАРОВ BELOVED PETS — только актуальные листинги Amazon US ===",
+             "Других товаров у бренда для контента НЕТ (Shopify, старые планы и память — не источник). "
+             "Ссылка после названия — листинг на Amazon, её прикладываем в ТЗ.",
              "Бейдж «Lab tested in the USA» — только для категории [treats]. Shreds in Gravy — "
              "новинка: топпер ПОВЕРХ полноценного корма, не замена ему; 12 чашек × 1.76 oz, "
              "по 4 каждого рецепта. Chicken Mix: Chicken Bliss, Chicken & Rabbit, Chicken & "
-             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon.",
-             "У «Flea & Tick Support Chews for Dogs» и «… for Dogs & Cats» вкус неизвестен — "
-             "НЕ придумывай его; в ТЗ пиши «вкус: уточнить у Марии (chicken / salmon / beef / bacon)»."]
+             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon."]
     for cat, group in by_cat.items():
         lines.append(f"\n[{cat}]")
         for p in group:
             fl = flavor_of(p)
             in_name = fl and _norm(fl) in _norm(p.get("title", ""))
-            lines.append(f"  • {p.get('title','')}" + (f"   ← ВКУС: {fl}" if fl and not in_name else ""))
+            lines.append(f"  • {p.get('title','')}" + (f"   ← ВКУС: {fl}" if fl and not in_name else "")
+                         + (f" · {p['url']}" if p.get("url") else ""))
     lines.append("СТРОГО ЗАПРЕЩЕНО называть товары TOBYDIC и любых других брендов, а также "
                  "товары и вкусы, которых нет в этом списке.")
 
@@ -350,10 +355,12 @@ def product_rule(brand: str = "BelovedPets") -> str:
     """Железное правило про товары — вставляется во ВСЕ промпты, где пишется ТЗ."""
     return (
         "\n⛔ ЖЕЛЕЗНОЕ ПРАВИЛО ПО ТОВАРАМ (нарушение = ТЗ бракуется и переписывается):\n"
-        "1. Товар берётся ТОЛЬКО из библиотеки выше. Товаров, которых там нет, не существует —\n"
-        "   не выдумывай ни названий, ни линеек, ни форматов упаковки.\n"
+        "1. Товар берётся ТОЛЬКО из библиотеки выше — это актуальные листинги Amazon. Товаров,\n"
+        "   которых там нет, не существует: не выдумывай ни названий, ни линеек, ни упаковок.\n"
         "2. В ТЗ обязательна строка **Товар:** с ПОЛНЫМ названием из библиотеки, СЛОВО В СЛОВО,\n"
-        "   вместе со скобками и размером. Не сокращай, не переводи, не переставляй слова.\n"
+        "   вместе со скобками и размером, и через « · » — ссылка на Amazon из библиотеки:\n"
+        "   «**Товар:** <название> · https://www.amazon.com/dp/<ASIN>». Не сокращай и не\n"
+        "   переводи название. Полный SEO-заголовок с Amazon в ТЗ не переписывай.\n"
         "3. ВКУС/вариант обязателен, если он есть у товара: «(Chicken)», «(Bacon)»,\n"
         "   «(Chicken Mix)» / «(Tuna Mix)». Формулировки вроде «чуйбы флиантик» — брак.\n"
         "4. Если у линейки несколько вкусов — выбери ОДИН и назови его явно. «Любой вкус» и\n"

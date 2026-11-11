@@ -210,7 +210,7 @@ def _rules_block(brand: str) -> str:
     return rules
 
 
-def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
+def _catalog_block(brand: str = "BelovedPets", limit: int = 150) -> str:
     """Точный список SKU с категорией — чтобы Джек не выдумывал товары и не путал
     тритсы с добавками (от категории зависит, можно ли ставить бейдж 'Lab tested')."""
     # У каждого бренда свой каталог (products.brand_products): Tobydic — 7 своих SKU, без
@@ -223,11 +223,11 @@ def _catalog_block(brand: str = "BelovedPets", limit: int = 60) -> str:
     except Exception:
         pass
     try:
-        from models.products import all_products, short_title
+        from models.products import brand_products, short_title
     except Exception:
         return ""
     lines = []
-    for p in all_products()[:limit]:
+    for p in brand_products(brand)[:limit]:
         cat = (p.get("category") or "?").upper()
         kb = p.get("knowledge_base_details") or {}
         use = (kb.get("Use cases") or kb.get("For") or "").strip()
@@ -466,6 +466,15 @@ def _check_product(name: str, brand: str) -> str:
     return f"⚠️ нет в каталоге, проверить: {name}"
 
 
+def _product_link(name: str, brand: str) -> str:
+    """Ссылка на листинг Amazon для товара из каталога ('' — бренд целиком или ⚠️)."""
+    try:
+        from models.products import product_url
+        return product_url(name, brand) if name and not name.startswith("⚠️") else ""
+    except Exception:
+        return ""
+
+
 def _normalise(posts: list[dict], slots: list[dict],
                team_roles: dict[str, str] | None = None,
                brand: str = "BelovedPets") -> list[dict]:
@@ -504,9 +513,10 @@ def _normalise(posts: list[dict], slots: list[dict],
         if fmt != "blogger_photo" and team_roles:
             owner = owner_for_format(fmt, team_roles, owner)
 
+        product = _check_product(post.get("product") or "", brand)[:160]
         title = (post.get("title") or "").strip()[:120] or "(без темы)"
         if fmt == "blogger_photo":
-            title = _blogger_title(title, post.get("product") or "")
+            title = _blogger_title(title, product)
 
         out.append({
             "date": slot["date"],
@@ -517,7 +527,8 @@ def _normalise(posts: list[dict], slots: list[dict],
             "format": fmt,
             "owner": owner,
             "pillar": (post.get("pillar") or "").strip()[:60],
-            "product": _check_product(post.get("product") or "", brand)[:160],
+            "product": product,
+            "product_url": _product_link(product, brand),
             "hook": (post.get("hook") or "").strip(),
             "script": _clean_md(post.get("script") or ""),
             "caption": limit_hashtags((post.get("caption") or "").strip()),
@@ -534,7 +545,11 @@ def _blogger_title(title: str, product: str) -> str:
     tail = re.sub(r"^\s*фото\s*(?:от\s*)?блогер[а-я]*\s*[·:—\-]*\s*", "", title, flags=re.I).strip()
     if not tail and product and not product.startswith("⚠️"):
         tail = re.sub(r"^Beloved Pets\s+", "", product.split(" - ")[0].split(" (")[0]).strip()
-        tail = " ".join(tail.split()[:4])
+        m = re.search(r"\(([^,)]+)", product)
+        flavor = m.group(1).strip() if m and not re.search(r"\d|pack", m.group(1), re.I) else ""
+        core = re.split(r"\s+(?:for|with|wrapped)\s+", tail, maxsplit=1, flags=re.I)[0]
+        core = re.sub(r"\b(?:Cat Food Topper|Dog Treats|Cat Treats|Dog Chews|Drops)\b", "", core)
+        tail = " ".join(core.split()[:5]) + (f" ({flavor})" if flavor else "")
     return f"фото от блогера · {tail}" if tail else "фото от блогера"
 
 
@@ -588,6 +603,11 @@ _FORMAT_RU = {"reel": "Reel / видео", "carousel": "Карусель", "anim
 _GRAPHIC_FORMATS = {"blogger_photo", "carousel", "promo"}
 
 
+def _product_line(p: dict) -> str:
+    link = p.get("product_url") or ""
+    return f'**Товар:** {p["product"]}' + (f" · {link}" if link else "")
+
+
 def _brief_text(p: dict) -> str:
     """Assemble the stored ТЗ exactly as the team reads it in a plan cell.
 
@@ -604,7 +624,7 @@ def _brief_text(p: dict) -> str:
         text_on = script or (f'"{p["hook"]}"' if p.get("hook") else "")
         parts = [f"**Вид креатива:** {kind}"]
         if p.get("product"):
-            parts.append(f'**Товар:** {p["product"]}')
+            parts.append(_product_line(p))
         if text_on:
             parts.append(f"**Надпись на креативе:**\n{text_on}")
         if caption:
@@ -617,7 +637,7 @@ def _brief_text(p: dict) -> str:
         idea, script = m.group(1).strip(" *"), script[m.end():].strip()
     parts = [f"**Формат:** {kind}"]
     if p.get("product"):
-        parts.append(f'**Товар:** {p["product"]}')
+        parts.append(_product_line(p))
     if idea:
         parts.append(f"**Идея:** {idea}")
     if p.get("hook"):

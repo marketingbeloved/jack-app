@@ -16,18 +16,24 @@ from models.products import (
 
 
 CATEGORY_BADGE = {
-    "treats":     {"bg": "#FEF3C7", "text": "#92400E", "border": "#FCD34D", "label": "🍖 Treats"},
-    "supplement": {"bg": "#D1FAE5", "text": "#065F46", "border": "#6EE7B7", "label": "💊 Supplement"},
-    "spray":      {"bg": "#DBEAFE", "text": "#1E40AF", "border": "#93C5FD", "label": "🌫 Spray"},
+    "treats":      {"bg": "#FEF3C7", "text": "#92400E", "border": "#FCD34D", "label": "🍖 Treats"},
+    "supplement":  {"bg": "#D1FAE5", "text": "#065F46", "border": "#6EE7B7", "label": "💊 Supplement"},
+    "spray":       {"bg": "#DBEAFE", "text": "#1E40AF", "border": "#93C5FD", "label": "🌫 Spray"},
+    "calming":     {"bg": "#EDE9FE", "text": "#5B21B6", "border": "#C4B5FD", "label": "🌙 Calming"},
+    "flea & tick": {"bg": "#FEE2E2", "text": "#991B1B", "border": "#FCA5A5", "label": "🐜 Flea & Tick"},
+    "eye & ear":   {"bg": "#DBEAFE", "text": "#1E40AF", "border": "#93C5FD", "label": "👁 Eye & Ear"},
+    "cat topper":  {"bg": "#FCE7F3", "text": "#9D174D", "border": "#F9A8D4", "label": "🐱 Cat Topper"},
 }
 
 
 def render():
-    cats = categories()
+    brand = st.session_state.get("brand", "BelovedPets")
+    cats = categories(brand)
     total = sum(cats.values())
 
-    st.markdown(f"# 📦 Products Library · BelovedPets")
-    st.caption(f"Single source of truth · {total} SKUs · loaded from Content Factory `products.json`")
+    st.markdown(f"# 📦 Products Library · {brand}")
+    st.caption(f"Только актуальные листинги Amazon US · {total} SKU · список — "
+               f"`models/amazon_catalog.py` (из таблицы ALL ASINS)")
 
     # ─── Global compliance banner ────────────────────────────────────────────
     gc = global_compliance()
@@ -54,14 +60,14 @@ def render():
     c1.metric("TOTAL SKUs", total)
     c2.metric("TREATS",     cats.get("treats", 0))
     c3.metric("SUPPLEMENTS", cats.get("supplement", 0))
-    c4.metric("SPRAYS",     cats.get("spray", 0))
+    c4.metric("OTHER",      total - cats.get("treats", 0) - cats.get("supplement", 0))
 
     # ─── Filter bar ─────────────────────────────────────────────────────────
     fc1, fc2 = st.columns([1, 3])
-    cat_filter = fc1.selectbox("Category", ["all", "treats", "supplement", "spray"], index=0)
+    cat_filter = fc1.selectbox("Category", ["all"] + sorted(cats), index=0)
     search = fc2.text_input("Search by title or description", placeholder="e.g. calming, eye, hemp...")
 
-    items = list_products(category=cat_filter, search=search if search else None)
+    items = list_products(category=cat_filter, search=search if search else None, brand=brand)
     st.caption(f"Showing **{len(items)}** of {total} products")
 
     # ─── Product grid ───────────────────────────────────────────────────────
@@ -99,7 +105,7 @@ def render():
                     st.markdown("**❌ Forbidden**")
                     for f in forb[:12]:
                         st.markdown(f"- {f}")
-                st.link_button("Open on belovedpets.com", url)
+                st.link_button(f"Open on Amazon · {p.get('asin', '')}", url)
 
 
 _CSS = """
