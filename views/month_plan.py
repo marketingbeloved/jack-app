@@ -90,6 +90,8 @@ def render() -> None:
                 st.caption("Не в дни постинга (" + plan_generator.posting_days_ru(brand) + "): "
                            + ", ".join(i["date"] for i in off) + ". Джек их оставит как есть.")
 
+    _offer_saved_draft(brand, gy, gm, month_label)
+
     market = st.selectbox("Рынок", ["US", "UK", "CA"], index=0, key="gen_month_market")
     extra = st.text_area(
         "Что учесть в этом месяце (пожелания, акции, новинки)",
@@ -107,6 +109,39 @@ def render() -> None:
                       owners, month_label, ideas)
 
     _preview(brand, owners)
+
+
+def draft_key(brand: str, year: int, month: int) -> str:
+    """Ключ готового черновика месяца в общей базе (его кладёт Claude вне сайта)."""
+    return f"month_draft_{brand}_{year}-{month:02d}"
+
+
+def _offer_saved_draft(brand: str, year: int, month: int, month_label: str) -> None:
+    """Готовый черновик, написанный вне сайта (когда генерация на сайте глючит).
+
+    Только открывает его в превью ниже — в план он попадает той же кнопкой «Залить»,
+    после того как Мария его посмотрела.
+    """
+    from models import shared_store
+    key = draft_key(brand, year, month)
+    try:
+        draft = shared_store.get_json(key, None)
+    except Exception:
+        draft = None
+    if not isinstance(draft, dict) or not draft.get("posts"):
+        return
+    n = len(draft["posts"])
+    st.info(f"📝 Есть готовый черновик на {month_label.lower()}: {n} постов "
+            f"({draft.get('author', 'Claude')}, {draft.get('created', '')}).")
+    if st.button(f"📂 Открыть черновик ({n} постов)", key="gen_month_open_saved",
+                 use_container_width=True):
+        st.session_state["gen_month_posts"] = draft["posts"]
+        st.session_state["gen_month_strategy"] = draft.get("strategy") or {}
+        st.session_state["gen_month_brand"] = brand
+        st.session_state["gen_month_label"] = month_label
+        st.session_state["gen_month_failed"] = []
+        st.session_state["gen_month_draft_key"] = key
+        st.rerun()
 
 
 def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
@@ -211,6 +246,10 @@ def _preview(brand: str, owners: dict) -> None:
             st.error("Часть не записалась:\n" + "\n".join(f"- {e}" for e in res["errors"][:10]))
         st.success(f"Добавлено постов: {res['added']} · ТЗ сохранено: {res['briefs']}. "
                    f"Смотри в разделе «📅 Content Plan».")
+        used = st.session_state.pop("gen_month_draft_key", None)
+        if used and res["added"]:
+            from models import shared_store
+            shared_store.put_json(used, {})      # залитый черновик второй раз не предлагаем
         for k in ("gen_month_posts", "gen_month_strategy", "gen_month_failed"):
             st.session_state.pop(k, None)
         st.rerun()

@@ -567,35 +567,46 @@ def commit_to_plan(posts: list[dict], brand: str = "BelovedPets",
     Returns {"added": n, "briefs": n, "errors": [...]}. Existing posts are left alone —
     this only appends, so a second run won't wipe anything the team edited by hand.
     """
-    from views.content_plan import add_plan_post
+    # Раньше каждый пост отдельно скачивал и сохранял весь план, а каждое ТЗ — дважды
+    # всю таблицу ТЗ: на 11 постов ~40 запросов, сайт «глючил» (Мария, 2026-11-11).
+    # Теперь: план читается один раз, ТЗ уходят одним запросом, план — одним.
+    import uuid
+    from views.content_plan import _save_plan, load_plan
     from models import plan_briefs
 
-    added = briefs = 0
     errors: list[str] = []
     stamp = date.today().strftime("%d.%m %H:%M")
+    plan = load_plan(brand)
+    entries: dict[str, dict] = {}
+    added = 0
 
     for p in posts:
         try:
-            pid = add_plan_post(brand, p["date"], p["title"], p["type"],
-                                p.get("pillar", ""), p.get("owner", ""))
+            day = plan.setdefault(p["date"], [])
+            if any(x.get("title") == p["title"] for x in day):
+                continue                     # повторное нажатие не плодит дубли
+            pid = f"{brand[:2].lower()}{p['date'].replace('.', '')}{uuid.uuid4().hex[:3]}"
+            day.append({"id": pid, "title": p["title"].strip(), "type": p["type"],
+                        "pillar": p.get("pillar", "").strip(), "owner": p.get("owner", ""),
+                        "format": p.get("format", "")})
             added += 1
         except Exception as e:
             errors.append(f'{p.get("date")}: {e}')
             continue
+        body = _brief_text(p) if write_briefs else ""
+        if body:
+            entries[pid] = {"text": body, "link": "", "title": p["title"],
+                            "pillar": p.get("pillar", ""), "for": p.get("owner", "dina"),
+                            "updated": stamp, "wish": ""}
 
-        if not write_briefs:
-            continue
-        body = _brief_text(p)
-        if not body:
-            continue
-        try:
-            plan_briefs.save(pid, body, title=p["title"], pillar=p.get("pillar", ""),
-                             for_who=p.get("owner", "dina"), updated=stamp)
-            briefs += 1
-        except Exception as e:
-            errors.append(f'ТЗ {p.get("date")}: {e}')
-
-    return {"added": added, "briefs": briefs, "errors": errors}
+    # Сначала ТЗ, потом план: если база не ответит, в календаре не будет постов без ТЗ.
+    try:
+        plan_briefs.save_many(entries)
+    except Exception as e:
+        return {"added": 0, "briefs": 0, "errors": [f"ТЗ не сохранились: {e}"]}
+    if added:
+        _save_plan(brand, plan)
+    return {"added": added, "briefs": len(entries), "errors": errors}
 
 
 _FORMAT_RU = {"reel": "Reel / видео", "carousel": "Карусель", "animation": "Анимация (оживление фото)",
