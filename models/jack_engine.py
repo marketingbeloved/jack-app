@@ -211,8 +211,8 @@ def _system_prompt() -> str:
         - Competitors I watch: Pet Honesty (premium-natural · main peer), Native Pet (vet-developed
           · most science-y), Zesty Paws (mass-market · we go premium NOT them), Bark Botanica
           (adaptogens · we steal their ingredient deep-dive format), Finn (premium minimal)
-        - Catalogue: only live Amazon US listings — the exact list for the CURRENT brand
-          comes below in «БИБЛИОТЕКА ТОВАРОВ». I never use products from memory.
+        - Catalogue: ONLY Maria's product base («БАЗА ТОВАРОВ» below, per brand and market):
+          names, benefits, usage, ingredients. I never use products or facts from memory.
         - Brand sells via Shopify (DTC), Amazon US/UK/CA, TikTok Shop, Chewy
         - Audience: 25-45 pet parents, premium-natural seekers, TikTok-search natives
 
@@ -837,6 +837,8 @@ _FORBIDDEN = [
     r"\bFDA\b", r"\b100%\s*safe\b", r"\bguaranteed\b", r"\bclinically proven\b",
     r"\bvet[- ](developed|recommended|approved|formulated)\b",
     r"\bmade in (the )?usa\b", r"\bdiagnos(e|is|tic)\b",
+    r"\bantibiotics?\b", r"\btreatments?\b", r"\binfections?\b", r"\brevolution\b",
+    r"\b(made|developed|approved|tested) by (usa |german )?vet", r"\bvet[- ]approved\b",
 ]
 
 
@@ -1113,7 +1115,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
             Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
 
             **Формат:** Reel, до 15 сек (или Анимация фото)
-            **Товар:** ПОЛНОЕ название из библиотеки, слово в слово, ВМЕСТЕ СО ВКУСОМ
+            **Товар:** название из базы целиком (с вкусом и размером) · ASIN · ссылка
             **Идея:** 1 фраза по-русски
             **Хук (0-2 сек):** "English"
             **Сцены:**
@@ -1131,7 +1133,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
             Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
 
             **Вид креатива:** фото от блогера / статичный пост / карусель N экранов / промо
-            **Товар:** ПОЛНОЕ название из библиотеки, слово в слово, ВМЕСТЕ СО ВКУСОМ
+            **Товар:** название из базы целиком (с вкусом и размером) · ASIN · ссылка
             **Надпись на креативе:** текст на английском. Для карусели — по строке на экран:
               1: "..."
               2: "..."
@@ -1147,7 +1149,13 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     # Библиотека товаров и правило про вкус — в КАЖДОЕ ТЗ, это главная причина брака.
     try:
         from models.products import catalog_block, product_rule
-        system += "\n\n" + catalog_block(brand) + "\n" + product_rule(brand)
+        mk = (market or "US").upper() if (market or "").upper() in ("US", "UK", "CA") else "US"
+        system += "\n\n" + catalog_block(brand, market=mk) + "\n" + product_rule(brand)
+        from models.products import resolve_products, product_facts, find_exact
+        named = [p["title"] for p in resolve_products(f"{title} {extra}", limit=2, brand=brand)]
+        facts = [product_facts(n, brand, mk) for n in named]
+        if any(facts):
+            system += "\n" + "\n".join(f for f in facts if f)
     except Exception:
         pass
     # Визуальную систему (холст, HEX, плашки) больше не подкладываем: решение Марии
@@ -1173,7 +1181,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         подтвердить их нечем. Можно: supports, may help with, gentle daily care, natural,
         holistic. Supplement, NOT medicine.
         НЕ выдумывай цены/скидки/акции, если их нет в пожеланиях.
-        ТОВАР — только из библиотеки, дословно и со вкусом. Выдуманный товар = брак ТЗ.
+        ТОВАР и факты о нём — только из базы, название дословно. Выдуманное = брак ТЗ.
     """)
     out = call_claude(user, system, timeout=150)
     if out.startswith("__ERROR__"):
@@ -1185,14 +1193,15 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     problems = check_brief(out, brand)
     if problems:
         out = _retry_with_problems(user, system, out, problems, brand)
-    return _with_link(out, brand)
+    return _with_link(out, brand, market)
 
 
-def _with_link(text: str, brand: str) -> str:
+def _with_link(text: str, brand: str, market: str | None = None) -> str:
     """Ссылка на листинг Amazon к товару в ТЗ (решение Марии 2026-11-11)."""
     try:
         from models.products import attach_link
-        return attach_link(text, brand)
+        mk = (market or "").upper()
+        return attach_link(text, brand, mk if mk in ("US", "UK", "CA") else None)
     except Exception:
         return text
 

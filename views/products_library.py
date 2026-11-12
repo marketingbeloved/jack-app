@@ -28,12 +28,13 @@ CATEGORY_BADGE = {
 
 def render():
     brand = st.session_state.get("brand", "BelovedPets")
-    cats = categories(brand)
+    market = st.radio("Рынок", ["US", "UK", "CA"], horizontal=True, key="lib_market")
+    cats = categories(brand, market)
     total = sum(cats.values())
 
     st.markdown(f"# 📦 Products Library · {brand}")
-    st.caption(f"Только актуальные листинги Amazon US · {total} SKU · список — "
-               f"`models/amazon_catalog.py` (из таблицы ALL ASINS)")
+    st.caption(f"База товаров BP и TOBYDIC (Amazon) · рынок {market} · {total} позиций · "
+               f"единственный источник для Джека")
 
     # ─── Global compliance banner ────────────────────────────────────────────
     gc = global_compliance()
@@ -67,7 +68,8 @@ def render():
     cat_filter = fc1.selectbox("Category", ["all"] + sorted(cats), index=0)
     search = fc2.text_input("Search by title or description", placeholder="e.g. calming, eye, hemp...")
 
-    items = list_products(category=cat_filter, search=search if search else None, brand=brand)
+    items = list_products(category=cat_filter, search=search if search else None,
+                          brand=brand, market=market)
     st.caption(f"Showing **{len(items)}** of {total} products")
 
     # ─── Product grid ───────────────────────────────────────────────────────
@@ -93,6 +95,11 @@ def render():
                 """,
                 unsafe_allow_html=True,
             )
+            with st.expander(f"📋 Из базы: ASIN {p.get('asin', '')} · применение · состав", expanded=False):
+                st.markdown("**Бенефиты:** " + (" · ".join(p.get("benefits") or [])
+                                                or "_нет в базе — спросить Машу_"))
+                st.markdown("**Как использовать:** " + (p.get("how_to_use") or "_нет в базе_"))
+                st.markdown("**Состав:** " + (p.get("ingredients") or "_нет в базе_"))
             with st.expander("⚖️ Compliance & writing rules for Jack", expanded=False):
                 safe = safe_phrases(p)
                 forb = forbidden_phrases(p)

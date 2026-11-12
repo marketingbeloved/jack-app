@@ -210,7 +210,7 @@ def _rules_block(brand: str) -> str:
     return rules
 
 
-def _catalog_block(brand: str = "BelovedPets", limit: int = 150) -> str:
+def _catalog_block(brand: str = "BelovedPets", limit: int = 200, market: str = "US") -> str:
     """Точный список SKU с категорией — чтобы Джек не выдумывал товары и не путал
     тритсы с добавками (от категории зависит, можно ли ставить бейдж 'Lab tested')."""
     # У каждого бренда свой каталог (products.brand_products): Tobydic — 7 своих SKU, без
@@ -219,7 +219,7 @@ def _catalog_block(brand: str = "BelovedPets", limit: int = 150) -> str:
     # short_title(..., 50), и хвост «(Salmon (for Cats))» отрезался вместе со вкусом.
     try:
         from models.products import catalog_block as _cb, product_rule as _pr
-        return "\n" + _cb(brand, limit) + "\n" + _pr(brand) + "\n"
+        return "\n" + _cb(brand, limit, market) + "\n" + _pr(brand) + "\n"
     except Exception:
         pass
     try:
@@ -353,7 +353,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
 {extra or '(нет)'}
 
-{_catalog_block(brand)}
+{_catalog_block(brand, market=market)}
 {team_ideas_block(ideas or [])}
 
 Уже занятые темы в этом месяце — НЕ повторяй:
@@ -441,7 +441,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     if parsed.get("error"):
         return []
     posts = parsed.get("posts") or []
-    return _normalise(posts, week_slots, team_roles, brand)
+    return _normalise(posts, week_slots, team_roles, brand, market)
 
 
 def _check_product(name: str, brand: str) -> str:
@@ -469,18 +469,18 @@ def _check_product(name: str, brand: str) -> str:
     return f"⚠️ нет в каталоге, проверить: {name}"
 
 
-def _product_link(name: str, brand: str) -> str:
-    """Ссылка на листинг Amazon для товара из каталога ('' — бренд целиком или ⚠️)."""
+def _product_link(name: str, brand: str, market: str = "US") -> str:
+    """Ссылка на листинг Amazon для товара из базы ('' — бренд целиком или ⚠️)."""
     try:
         from models.products import product_url
-        return product_url(name, brand) if name and not name.startswith("⚠️") else ""
+        return product_url(name, brand, market) if name and not name.startswith("⚠️") else ""
     except Exception:
         return ""
 
 
 def _normalise(posts: list[dict], slots: list[dict],
                team_roles: dict[str, str] | None = None,
-               brand: str = "BelovedPets") -> list[dict]:
+               brand: str = "BelovedPets", market: str = "US") -> list[dict]:
     """Force the model's output back onto the real calendar.
 
     The model drifts on dates and occasionally drops or duplicates a slot, so slots are
@@ -531,7 +531,7 @@ def _normalise(posts: list[dict], slots: list[dict],
             "owner": owner,
             "pillar": (post.get("pillar") or "").strip()[:60],
             "product": product,
-            "product_url": _product_link(product, brand),
+            "product_url": _product_link(product, brand, market),
             "hook": (post.get("hook") or "").strip(),
             "script": _clean_md(post.get("script") or ""),
             "caption": limit_hashtags((post.get("caption") or "").strip()),
@@ -547,12 +547,20 @@ def _blogger_title(title: str, product: str) -> str:
     """
     tail = re.sub(r"^\s*фото\s*(?:от\s*)?блогер[а-я]*\s*[·:—\-]*\s*", "", title, flags=re.I).strip()
     if not tail and product and not product.startswith("⚠️"):
-        tail = re.sub(r"^Beloved Pets\s+", "", product.split(" - ")[0].split(" (")[0]).strip()
-        m = re.search(r"\(([^,)]+)", product)
-        flavor = m.group(1).strip() if m and not re.search(r"\d|pack", m.group(1), re.I) else ""
-        core = re.split(r"\s+(?:for|with|wrapped)\s+", tail, maxsplit=1, flags=re.I)[0]
-        core = re.sub(r"\b(?:Cat Food Topper|Dog Treats|Cat Treats|Dog Chews|Drops)\b", "", core)
-        tail = " ".join(core.split()[:5]) + (f" ({flavor})" if flavor else "")
+        # «TOBYDIC Herbal Intestinal Cleanse Drops with Probiotic for Dogs & Cats, 60 ml»
+        # → «Herbal Intestinal Cleanse with Probiotic»; «… Topper — Tuna Shreds in Gravy»
+        # → «Tuna Shreds in Gravy». Размер и «for Dogs & Cats» в календаре не нужны.
+        t = re.sub(r"^(Beloved Pets|TOBYDIC)\s+", "", product, flags=re.I)
+        t = re.split(r",\s*\d|,\s*\d?\s*pack|\s+\(", t)[0]
+        if " — " in t:
+            left, right = t.split(" — ", 1)
+            t = right if len(right.split()) >= 2 else f"{left} {right}"
+        t = re.split(r"\s+for\s+", t, maxsplit=1, flags=re.I)[0]
+        t = re.sub(r"\b(?:Drops|Soft Chews|Dog Treats)\b", "", t)
+        tail = " ".join(t.split()[:6])
+        fl = re.search(r",\s*([A-Za-z][A-Za-z &]+)$", product)       # «…, Salmon» — вкус
+        if fl and not re.search(r"pack|refill|diffuser", fl.group(1), re.I) and fl.group(1) not in tail:
+            tail += f" ({fl.group(1).strip()})"
     return f"фото от блогера · {tail}" if tail else "фото от блогера"
 
 

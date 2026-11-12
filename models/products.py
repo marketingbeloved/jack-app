@@ -1,4 +1,4 @@
-"""Products knowledge base — loads 58 BelovedPets SKUs from Content Factory products.json.
+"""База товаров BP и TOBYDIC — models/product_base.json (из Excel Маши, 2026-11-12).
 
 Provides:
 - list_products(category=None, search=None) — filtered list
@@ -42,52 +42,70 @@ def _load():
     return {"products": [], "global_compliance": {}, "category_knowledge_base": {}}
 
 
-# TOBYDIC — 7 SKU, все herbal liquid drops 2 oz. Список и ASIN — только из Amazon
-# (models/amazon_catalog.py, решение Марии 2026-11-11).
-def _tobydic() -> list[dict]:
-    from models.amazon_catalog import TOBYDIC, url
-    return [{"id": asin, "asin": asin, "url": url(asin), "title": name,
-             "category": "supplement", "flavor": "", "description_short": desc}
-            for asin, name, desc in TOBYDIC]
+# ─── База товаров: единственный источник (решение Марии 2026-11-12) ─────────
+# «База товаров BP и TOBYDIC (Amazon)» → models/product_base.json. Одна запись = один
+# ASIN на одном рынке (US/UK/CA). Название — колонка «Чёткое название (EN)», бенефиты —
+# из базы без запрещённых формулировок, применение и состав — дословно из базы.
+# Пересборка: scripts/build_product_base.py <xlsx>.
+BASE_JSON = Path(__file__).resolve().parent / "product_base.json"
+DEFAULT_MARKET = "US"
 
 
-TOBYDIC_PRODUCTS = _tobydic()
+@lru_cache(maxsize=1)
+def _base() -> tuple:
+    try:
+        rows = json.loads(BASE_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        rows = []
+    out = []
+    for r in rows:
+        out.append({**r, "id": f'{r["asin"]}-{r["market"]}', "flavor": "",
+                    "description_short": " · ".join(r.get("benefits") or [])})
+    return tuple(out)
 
 
 def _is_tobydic(brand: str) -> bool:
     return (brand or "").strip().lower() == "tobydic"
 
 
-def brand_products(brand: str = "BelovedPets") -> list[dict]:
-    """Каталог именно этого бренда. Чужие SKU в промпт не попадают."""
-    return list(TOBYDIC_PRODUCTS) if _is_tobydic(brand) else beloved_products()
+def _brand_key(brand: str) -> str:
+    return "TOBYDIC" if _is_tobydic(brand) else "BelovedPets"
 
 
-def beloved_products() -> list[dict]:
-    """Каталог Beloved Pets = только актуальные листинги Amazon US (models/amazon_catalog.py).
+def brand_products(brand: str = "BelovedPets", market: str | None = None) -> list[dict]:
+    """Товары бренда на рынке (по умолчанию US). Чужой бренд сюда не попадает никогда.
 
-    Решение Марии 2026-11-11: товары и названия — только оттуда. Shopify-выгрузка нужна
-    лишь для состава и описания ТОГО ЖЕ товара (связь по shopify_id); товаров только из
-    Shopify и добавленных в чате больше нет. Работает и без выгрузки — тогда без описаний.
+    market="all" — все рынки (для проверки названий: имена на рынках совпадают).
     """
-    from models.amazon_catalog import BELOVED, DESCRIPTIONS, url
-
-    shop = {p.get("shopify_id"): p for p in _load().get("products", [])}
-    out = []
-    for asin, name, cat, flavor, sid in BELOVED:
-        base = dict(shop.get(sid) or {}) if sid else {}
-        shop_title = base.pop("title", "")
-        base.pop("url", None)
-        out.append({**base, "id": asin, "asin": asin, "url": url(asin), "title": name,
-                    "category": cat, "flavor": flavor, "shop_title": shop_title,
-                    "description_short": DESCRIPTIONS.get(asin)
-                    or base.get("description_short", "")})
-    return out
+    b = _brand_key(brand)
+    m = (market or DEFAULT_MARKET).upper()
+    return [dict(p) for p in _base()
+            if p["brand"] == b and (m == "ALL" or p["market"] == m)]
 
 
-def product_url(name: str, brand: str = "BelovedPets") -> str:
-    """Ссылка на Amazon для товара по его названию из каталога ('' — не нашли)."""
-    p = find_exact(name, brand) or find_mentioned(name, brand)
+TOBYDIC_PRODUCTS = brand_products("TOBYDIC")
+
+
+def beloved_products(market: str | None = None) -> list[dict]:
+    return brand_products("BelovedPets", market)
+
+
+def product_facts(name: str, brand: str = "BelovedPets", market: str | None = None) -> str:
+    """Бенефиты, применение и состав товара из базы — для промпта ТЗ (правило 3)."""
+    p = find_exact(name, brand, market) or find_mentioned(name, brand, market)
+    if not p:
+        return ""
+    ben = "; ".join(p.get("benefits") or []) or "нет в базе — не придумывать, спросить Машу"
+    use = p.get("how_to_use") or "нет в базе — не придумывать, спросить Машу"
+    return (f"ФАКТЫ О ТОВАРЕ ИЗ БАЗЫ ({p['market']}) — бери только отсюда:\n"
+            f"• Товар: {p['title']} · ASIN {p['asin']} · {p['url']}\n"
+            f"• Бенефиты: {ben}\n• Как использовать: {use[:700]}\n"
+            f"• Состав: {(p.get('ingredients') or 'нет в базе')[:700]}\n")
+
+
+def product_url(name: str, brand: str = "BelovedPets", market: str | None = None) -> str:
+    """Ссылка на Amazon для товара по его названию ('' — не нашли)."""
+    p = find_exact(name, brand, market) or find_mentioned(name, brand, market)
     return (p or {}).get("url", "")
 
 
@@ -98,31 +116,31 @@ def other_brand_product(name: str, brand: str = "BelovedPets") -> dict | None:
     TOBYDIC, в Beloved Pets — только Beloved Pets.
     """
     other = "BelovedPets" if _is_tobydic(brand) else "TOBYDIC"
-    if find_exact(name, brand):
+    if find_exact(name, brand, "all"):
         return None
-    return find_exact(name, other) or find_mentioned(name, other)
+    return find_exact(name, other, "all") or find_mentioned(name, other, "all")
 
 
-def attach_link(text: str, brand: str = "BelovedPets") -> str:
+def attach_link(text: str, brand: str = "BelovedPets", market: str | None = None) -> str:
     """Дописать ссылку Amazon в строку «**Товар:** …», если Джек её не поставил."""
     def fix(m: "re.Match") -> str:
         line = m.group(0)
         if "amazon." in line:
             return line
         named = m.group(2).strip().strip("*").split("·")[0].strip()
-        link = product_url(named, brand)
+        link = product_url(named, brand, market)
         return f"{line.rstrip()} · {link}" if link else line
     return re.sub(r"^(\s*\*\*Товар(?: в кадре)?:\*\*)\s*(.+)$", fix, text or "", flags=re.M)
 
 
 def all_products() -> list[dict]:
-    """Все товары обоих брендов — только актуальные листинги Amazon (amazon_catalog.py)."""
-    return beloved_products() + list(TOBYDIC_PRODUCTS)
+    """Все товары обоих брендов (US) — только из базы товаров."""
+    return beloved_products() + brand_products("TOBYDIC")
 
 
-def categories(brand: str = "BelovedPets") -> dict[str, int]:
+def categories(brand: str = "BelovedPets", market: str | None = None) -> dict[str, int]:
     out: dict[str, int] = {}
-    for p in brand_products(brand):
+    for p in brand_products(brand, market):
         out[p.get("category", "?")] = out.get(p.get("category", "?"), 0) + 1
     return out
 
@@ -143,8 +161,8 @@ def get_product(product_id: str) -> dict | None:
 
 
 def list_products(category: str | None = None, search: str | None = None,
-                  brand: str | None = None) -> list[dict]:
-    items = brand_products(brand) if brand else all_products()
+                  brand: str | None = None, market: str | None = None) -> list[dict]:
+    items = brand_products(brand, market) if brand else all_products()
     if category and category != "all":
         items = [p for p in items if p.get("category") == category]
     if search:
@@ -276,137 +294,114 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
 
 
-def find_exact(title: str, brand: str = "BelovedPets") -> dict | None:
-    """Товар по полному названию (регистр и пунктуация не важны). None — такого нет."""
+def find_exact(title: str, brand: str = "BelovedPets", market: str | None = "all") -> dict | None:
+    """Товар по полному названию из базы (регистр и пунктуация не важны). None — нет.
+
+    По умолчанию ищем по всем рынкам бренда (названия на рынках одинаковые); если
+    передан рынок — сначала он, чтобы ссылка/ASIN были того рынка.
+    """
     n = _norm(title)
     if not n:
         return None
-    for p in brand_products(brand):
-        if _norm(p.get("title", "")) == n:
-            return p
+    pools = [brand_products(brand, market)] if market and market.lower() == "all" else \
+        [brand_products(brand, market), brand_products(brand, "all")]
+    for pool in pools:
+        for p in pool:
+            if _norm(p.get("title", "")) == n:
+                return p
     return None
 
 
-def find_mentioned(title: str, brand: str = "BelovedPets") -> dict | None:
-    """Товар, чьё название совпадает или является началом указанного (и наоборот).
-
-    Джек иногда обрезает хвост названия — это не «выдуманный товар», а неполное имя.
-    """
+def candidates(title: str, brand: str = "BelovedPets", market: str | None = None) -> list[dict]:
+    """Товары, чьё название начинается с указанного: «… Chicken Jerky Strips for Dogs»
+    → варианты 300 g и 680 g. Для подсказки «какой именно?» (правило 2)."""
     n = _norm(title)
-    if len(n) < 12:
-        return None
-    for p in brand_products(brand):
-        pn = _norm(p.get("title", ""))
-        if n == pn or n.startswith(pn[:60]) or pn.startswith(n[:60]):
-            return p
-    return None
+    if len(n) < 8:
+        return []
+    out, seen = [], set()
+    for p in brand_products(brand, market):
+        if _norm(p["title"]).startswith(n) and p["title"] not in seen:
+            seen.add(p["title"])
+            out.append(p)
+    return out
 
 
-def catalog_block(brand: str = "BelovedPets", limit: int = 150) -> str:
-    """ТОЧНЫЕ названия товаров для промпта — целиком, со вкусом, без обрезки.
+def find_mentioned(title: str, brand: str = "BelovedPets", market: str | None = None) -> dict | None:
+    """Неполное название → товар, только если вариант ОДИН (иначе угадывать нельзя)."""
+    c = candidates(title, brand, market)
+    return c[0] if len(c) == 1 else None
 
-    Раньше в промпт уходил `short_title(..., 50)`, и хвост «(Salmon (for Cats))»
-    отрезался вместе со вкусом — Джек про вкус и не знал.
-    """
-    if _is_tobydic(brand):
-        lines = ["=== БИБЛИОТЕКА ТОВАРОВ TOBYDIC — актуальные листинги Amazon (7 SKU) ===",
-                 "Все — herbal liquid drops 2 oz / 60 ml для собак и кошек, с 12 недель. "
-                 "Фокус ~70% контента: Urinary, Multivitamin 21-in-1, Yeast & Skin."]
-        for p in TOBYDIC_PRODUCTS:
-            lines.append(f"  • {p['title']}   — {p['description_short']} · {p['url']}")
-        lines.append("СТРОГО ЗАПРЕЩЕНО называть товары Beloved Pets и любых других брендов — "
-                     "у Tobydic только эти 7 позиций.")
-        return "\n".join(lines)
 
-    items = brand_products(brand)[:limit]
+def catalog_block(brand: str = "BelovedPets", limit: int = 200, market: str | None = None) -> str:
+    """Библиотека для промпта: точные названия из базы + ASIN, ссылка и короткие бенефиты."""
+    m = (market or DEFAULT_MARKET).upper()
+    items = brand_products(brand, m)[:limit]
     if not items:
-        # Каталог не загрузился (нет файла и нет копии в общей базе). Без списка Джек
-        # гарантированно выдумает названия — поэтому запрещаем называть SKU вообще.
-        return ("\nБИБЛИОТЕКА ТОВАРОВ СЕЙЧАС НЕДОСТУПНА. Конкретные названия товаров НЕ пиши — "
-                "ни одного. В строке **Товар:** пиши «уточнить у Марии», в тексте — общо "
-                "(«our drops», «our chews»). Выдумывать названия, вкусы и линейки нельзя.\n")
-
+        return (f"\nВ БАЗЕ ТОВАРОВ НЕТ ТОВАРОВ {brand} ДЛЯ РЫНКА {m}. Конкретные товары НЕ "
+                "называй и не подставляй другой рынок: в строке **Товар:** пиши «нет в базе "
+                f"для {m} — спросить Машу».\n")
+    head = "TOBYDIC" if _is_tobydic(brand) else "BELOVED PETS"
+    lines = [f"=== БАЗА ТОВАРОВ {head} · рынок {m} (единственный источник, {len(items)} позиций) ===",
+             "Название — СЛОВО В СЛОВО, с вкусом и размером. Бенефиты — только указанные здесь; "
+             "у кого бенефитов нет — не придумывай. Бейдж «Lab tested in the USA» — только [treats]."]
+    if _is_tobydic(brand):
+        lines.append("Все — herbal liquid drops для собак и кошек. Фокус ~70% контента: Urinary, "
+                     "21-in-1 Multivitamin, Yeast & Itch.")
+    else:
+        lines.append("Cat Food Topper (Shreds in Gravy) подаётся ПОВЕРХ полноценного корма, не вместо.")
     by_cat: dict[str, list[dict]] = {}
     for p in items:
-        by_cat.setdefault(str(p.get("category") or "Прочее"), []).append(p)
-
-    lines = ["=== БИБЛИОТЕКА ТОВАРОВ BELOVED PETS — только актуальные листинги Amazon US ===",
-             "Других товаров у бренда для контента НЕТ (Shopify, старые планы и память — не источник). "
-             "Ссылка после названия — листинг на Amazon, её прикладываем в ТЗ.",
-             "Бейдж «Lab tested in the USA» — только для категории [treats]. Shreds in Gravy — "
-             "новинка: топпер ПОВЕРХ полноценного корма, не замена ему; 12 чашек × 1.76 oz, "
-             "по 4 каждого рецепта. Chicken Mix: Chicken Bliss, Chicken & Rabbit, Chicken & "
-             "Shrimp. Tuna Mix: Tuna Bliss, Tuna & Shrimp, Tuna & Salmon."]
+        by_cat.setdefault(str(p.get("category") or "?"), []).append(p)
     for cat, group in by_cat.items():
         lines.append(f"\n[{cat}]")
         for p in group:
-            fl = flavor_of(p)
-            in_name = fl and _norm(fl) in _norm(p.get("title", ""))
-            lines.append(f"  • {p.get('title','')}" + (f"   ← ВКУС: {fl}" if fl and not in_name else "")
-                         + (f" · {p['url']}" if p.get("url") else ""))
-    lines.append("СТРОГО ЗАПРЕЩЕНО называть товары TOBYDIC и любых других брендов, а также "
-                 "товары и вкусы, которых нет в этом списке.")
-
-    # Семейства с несколькими вкусами — самая частая ошибка: назвать «чуйбы» без вкуса.
-    fams: dict[str, set] = {}
-    for p in items:
-        fl = flavor_of(p)
-        if not fl:
-            continue
-        key = _norm(p.get("title", "")).replace(_norm(fl), "")[:40]
-        fams.setdefault(key, set()).add(fl)
-    multi = {k: v for k, v in fams.items() if len(v) > 1}
-    if multi:
-        lines.append("\nУ ЭТИХ ПОЗИЦИЙ НЕСКОЛЬКО ВКУСОВ — вкус называть ОБЯЗАТЕЛЬНО:")
-        for v in multi.values():
-            lines.append("  • варианты: " + ", ".join(sorted(v)))
+            ben = " · ".join(p.get("benefits") or [])[:110]
+            lines.append(f"  • {p['title']} · ASIN {p['asin']} · {p['url']}"
+                         + (f"\n      бенефиты: {ben}" if ben else ""))
+    other = "Beloved Pets" if _is_tobydic(brand) else "TOBYDIC"
+    lines.append(f"\nСТРОГО ЗАПРЕЩЕНО называть товары {other} и любых других брендов, товары "
+                 "других рынков, а также товары, вкусы и размеры, которых нет в этом списке.")
     return "\n".join(lines)
 
 
 def product_rule(brand: str = "BelovedPets") -> str:
-    """Железное правило про товары — вставляется во ВСЕ промпты, где пишется ТЗ."""
+    """Правила Маши по товарам (база товаров, 2026-11-12) — во ВСЕ промпты, где пишется ТЗ."""
     return (
-        "\n⛔ ЖЕЛЕЗНОЕ ПРАВИЛО ПО ТОВАРАМ (нарушение = ТЗ бракуется и переписывается):\n"
-        "1. Товар берётся ТОЛЬКО из библиотеки выше — это актуальные листинги Amazon. Товаров,\n"
-        "   которых там нет, не существует: не выдумывай ни названий, ни линеек, ни упаковок.\n"
-        "2. В ТЗ обязательна строка **Товар:** с ПОЛНЫМ названием из библиотеки, СЛОВО В СЛОВО,\n"
-        "   вместе со скобками и размером, и через « · » — ссылка на Amazon из библиотеки:\n"
-        "   «**Товар:** <название> · https://www.amazon.com/dp/<ASIN>». Не сокращай и не\n"
-        "   переводи название. Полный SEO-заголовок с Amazon в ТЗ не переписывай.\n"
-        "3. ВКУС/вариант обязателен, если он есть у товара: «(Chicken)», «(Bacon)»,\n"
-        "   «(Chicken Mix)» / «(Tuna Mix)». Формулировки вроде «чуйбы флиантик» — брак.\n"
-        "4. Если у линейки несколько вкусов — выбери ОДИН и назови его явно. «Любой вкус» и\n"
-        "   «на выбор» в ТЗ не пишем: креатор должен знать, какую пачку ставить в кадр.\n"
-        "5. Не знаешь, какой товар подходит теме — возьми ближайший из библиотеки и скажи об\n"
-        "   этом одной строкой. Придумать товар нельзя ни при каких условиях.\n"
+        "\n⛔ ПРАВИЛА ПО ТОВАРАМ (нарушение = ТЗ бракуется):\n"
+        "1. ТОЛЬКО БАЗА. Единственный источник о товарах — база выше. Название, бенефиты,\n"
+        "   применение и состав — только оттуда. Не бери из Shopify, Amazon, соцсетей, старых\n"
+        "   постов и ТЗ, из памяти. Товара нет в базе — его нет: не пиши о нём, спроси Машу.\n"
+        "2. НАЗВАНИЕ СЛОВО В СЛОВО. Строка «**Товар:** <название из базы целиком, с вкусом и\n"
+        "   размером> · ASIN <ASIN> · <ссылка>». Не сокращай, не переводи, не смешивай два товара.\n"
+        "   Если в запросе название неточное («джерки» без вкуса и веса) — не угадывай:\n"
+        "   перечисли 2–3 подходящих из базы и спроси, какой.\n"
+        "3. ФАКТЫ ТОЛЬКО ИЗ БАЗЫ. Не добавляй бенефитов, вкусов, размеров и цифр, которых там\n"
+        "   нет. Запрещено: Made in USA, vet-developed, vet approved, treatment, cure, medicine,\n"
+        "   antibiotic, infection, Revolution. Слово «Natural Antibiotic» допустимо ТОЛЬКО в\n"
+        "   строке «Товар:» как часть названия — в хуках, текстах на экране и подписях нет.\n"
+        "   Lab tested in USA — только у лакомств. Мы добавка, не лекарство («supports»).\n"
+        "4. БРЕНДЫ И РЫНКИ НЕ СМЕШИВАТЬ. Beloved Pets — только его товары, TOBYDIC — только\n"
+        "   свои. Для US — строки US, UK — UK, CA — CA. Нет товара на рынке — скажи об этом.\n"
     )
 
 
-def validate_products(text: str, brand: str = "BelovedPets") -> list[str]:
-    """Проверка готового ТЗ: товар назван, существует, вкус указан. Пустой список — всё ок."""
+def validate_products(text: str, brand: str = "BelovedPets", market: str | None = None) -> list[str]:
+    """Проверка ТЗ: товар из базы, название дословно, нужного бренда. [] — всё ок."""
     problems: list[str] = []
-    if not brand_products(brand):
-        return problems                      # каталог не загрузился — проверять не с чем
+    if not brand_products(brand, "all"):
+        return problems                      # база не загрузилась — проверять не с чем
     m = re.search(r"^\s*\*\*Товар(?: в кадре)?:\*\*\s*(.+)$", text or "", re.M)
     if not m:
-        return ["в ТЗ нет строки «**Товар:**» с названием из библиотеки"]
+        return ["в ТЗ нет строки «**Товар:**» с названием из базы"]
     named = m.group(1).strip().strip("*").split("·")[0].strip()
-    if named.lower().startswith(("вся линейка", "бренд", "нет", "—")):
+    if named.lower().startswith(("вся линейка", "бренд", "нет", "—", "уточнить")):
         return problems                      # бренд-ТЗ без конкретного SKU — это законно
-    p = find_exact(named, brand) or find_mentioned(named, brand)
-    if not p and other_brand_product(named, brand):
-        problems.append(f"«{named[:70]}» — товар другого бренда; бренды не смешиваем, "
-                        f"бери только из библиотеки {brand}")
+    if find_exact(named, brand, market):
         return problems
-    if not p:
-        problems.append(f"товара «{named[:70]}» нет в библиотеке — название выдумано или искажено")
-        return problems
-    # Пробелы при сравнении не считаем: «60 ml» и «60ml» — одно и то же, ругаться на это
-    # значит приучить команду игнорировать проверку.
-    tight = lambda x: _norm(x).replace(" ", "")
-    if tight(named) != tight(p.get("title", "")):
-        problems.append(f"название не совпадает с библиотекой дословно — в базе: «{p['title'][:90]}»")
-    fl = flavor_of(p)
-    if fl and _norm(fl) not in _norm(named):
-        problems.append(f"не указан вкус — у этого товара он есть: «{fl}»")
-    return problems
+    if other_brand_product(named, brand):
+        return [f"«{named[:70]}» — товар другого бренда; бренды не смешиваем, "
+                f"бери только из базы {brand}"]
+    c = candidates(named, brand, market or "all")
+    if c:
+        return ["название неполное — в базе: " + " / ".join(f"«{p['title']}»" for p in c[:3])]
+    return [f"товара «{named[:70]}» нет в базе — название выдумано или искажено"]
