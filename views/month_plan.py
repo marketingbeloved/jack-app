@@ -103,15 +103,18 @@ def render() -> None:
         key="gen_month_extra", height=90,
         placeholder="напр. запуск нового вкуса; акцент на возврате в школу")
 
-    if st.button(f"🐾 Джек, напиши план на {month_label.lower()}", type="primary",
+    busy = _running(brand, gy, gm)
+    if st.button(f"🐾 Джек, напиши план на {month_label.lower()}" if not busy
+                 else "⏳ Джек уже пишет этот месяц…", type="primary", disabled=busy,
                  use_container_width=True, key="gen_month_go"):
         if not analysis.get("total") and not ideas:
             st.error("В базе нет прошлых месяцев — Джеку не на чем строить анализ.")
         elif not n_free and not to_develop:
             st.info("Все дни постинга этого месяца уже заняты вашими постами с ТЗ — писать нечего.")
         else:
-            _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
-                      owners, month_label, ideas)
+            _start_generation(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
+                              owners, month_label, ideas)
+    _job_panel(brand, gy, gm, month_label)
 
     _preview(brand, owners)
 
@@ -194,11 +197,57 @@ def _offer_saved_draft(brand: str, year: int, month: int, month_label: str) -> N
         st.rerun()
 
 
-def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
-              owners, month_label, ideas=None) -> None:
+# ─── Генерация месяца в фоне (решение Марии 2026-11-14) ──────────────────────
+# Streamlit перезапускает страницу при ЛЮБОМ клике, и генерация, шедшая внутри страницы,
+# обрывалась («чуть где щёлкну сбоку — всё сбивается»). Теперь она идёт в отдельном
+# потоке, независимом от страницы: кликать можно, даже закрыть вкладку. Прогресс страница
+# опрашивает раз в 3 секунды, готовый черновик ложится в общую базу.
+
+@st.cache_resource
+def _jobs() -> dict:
+    return {}
+
+
+def _job_key(brand: str, gy: int, gm: int) -> str:
+    return f"{brand.lower()}-{gy}-{gm:02d}"
+
+
+def _running(brand: str, gy: int, gm: int) -> bool:
+    job = _jobs().get(_job_key(brand, gy, gm)) or {}
+    return job.get("status") == "running"
+
+
+def _start_generation(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
+                      owners, month_label, ideas=None) -> None:
+    import threading
+    import time
+    import uuid
+    key = _job_key(brand, gy, gm)
+    if _running(brand, gy, gm):
+        return
+    job = {"id": uuid.uuid4().hex[:8], "status": "running", "frac": 0.02, "started": time.time(),
+           "text": "Джек разбирает ЦА и придумывает концепты месяца, потом строго их проверяет…",
+           "label": month_label}
+    _jobs()[key] = job
+
+    def work() -> None:
+        def progress(frac: float, text: str) -> None:
+            job.update(frac=frac, text=text)
+        try:
+            res = _build_month(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
+                               owners, ideas, progress)
+            job.update(status="error" if res.get("fatal") else "done", result=res,
+                       error=res.get("fatal", ""))
+        except Exception as e:  # noqa: BLE001
+            job.update(status="error", error=f"{type(e).__name__}: {str(e)[:300]}")
+
+    threading.Thread(target=work, daemon=True, name=f"month-{key}").start()
+
+
+def _build_month(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
+                 owners, ideas, progress) -> dict:
+    """Вся генерация месяца без обращений к странице. Возвращает черновик и сохраняет его."""
     from models import idea_bank, plan_analytics
-    progress = st.progress(0.0, text="Джек разбирает ЦА и придумывает концепты месяца, "
-                                     "потом строго их проверяет (1-2 мин)…")
     try:
         bank = idea_bank.unused(brand)
     except Exception:
@@ -208,13 +257,11 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
                                              slots=plan_generator.free_slots(weeks),
                                              ideas=ideas, bank=bank, recent=recent)
     if strategy.get("error"):
-        progress.empty()
-        st.error(f"Не получилось собрать стратегию: {strategy['error']}")
-        if strategy.get("raw"):
-            st.code(strategy["raw"])
-        return
+        return {"fatal": f"Не получилось собрать стратегию: {strategy['error']}",
+                "raw": strategy.get("raw", "")}
 
     name_map = {s: m.get("name", s) for s, m in owners.items()}
+    roles = {s: m.get("role", "") for s, m in owners.items()}
     posts: list[dict] = []
     used: list[str] = [i["title"] for i in ideas or []] + recent[:40]
     failed: list[int] = []
@@ -223,15 +270,12 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     for i, week in enumerate(weeks, start=1):
         if all(s.get("fixed") for s in week):
             continue                         # неделя целиком из идей команды
-        progress.progress(i / (len(weeks) + 1),
-                          text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
+        progress(i / (len(weeks) + 1), f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
         try:
             got = plan_generator.generate_week(
                 week, strategy, analysis, i, len(weeks), brand=brand, market=market,
-                used_titles=used, extra=extra, owner_names=name_map,
-                team_roles={s: m.get("role", "") for s, m in owners.items()},
-                ideas=ideas,
-                bank=plan_generator._bank_for_month(strategy, bank, bank_used))
+                used_titles=used, extra=extra, owner_names=name_map, team_roles=roles,
+                ideas=ideas, bank=plan_generator._bank_for_month(strategy, bank, bank_used))
         except Exception as e:  # noqa: BLE001 — одна неделя не должна ронять весь месяц
             errors.append(f"неделя {i}: {type(e).__name__}: {str(e)[:150]}")
             got = []
@@ -243,12 +287,10 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
         bank_used.update(p["bank_id"] for p in got if p.get("bank_id"))
     to_develop = plan_generator.ideas_to_develop(ideas)
     if to_develop:
-        progress.progress(len(weeks) / (len(weeks) + 1),
-                          text=f"Дописывает ТЗ к вашим идеям ({len(to_develop)})…")
+        progress(len(weeks) / (len(weeks) + 1), f"Дописывает ТЗ к вашим идеям ({len(to_develop)})…")
         try:
             posts.extend(plan_generator.develop_ideas(
-                to_develop, strategy, gy, brand=brand, market=market, extra=extra,
-                team_roles={s: m.get("role", "") for s, m in owners.items()}))
+                to_develop, strategy, gy, brand=brand, market=market, extra=extra, team_roles=roles))
         except Exception as e:  # noqa: BLE001
             errors.append(f"идеи команды: {type(e).__name__}: {str(e)[:150]}")
         posts.sort(key=lambda p: p.get("iso", ""))
@@ -256,26 +298,54 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     for p in posts:
         if not p.get("idea_id"):
             p["similar_to"] = plan_generator.similar_to_history(p.get("title", ""), history)
-    progress.empty()
 
-    st.session_state["gen_month_posts"] = posts
-    st.session_state["gen_month_strategy"] = strategy
-    st.session_state["gen_month_brand"] = brand
-    st.session_state["gen_month_label"] = month_label
-    st.session_state["gen_month_failed"] = failed
-    st.session_state["gen_month_errors"] = errors
-    # Черновик — сразу в общую базу: если страница упадёт или вкладка закроется, план не
-    # пропадёт, а появится кнопкой «📂 Открыть черновик».
+    key = draft_key(brand, gy, gm)
     if posts:
+        # Черновик — сразу в общую базу: открывается с любого устройства кнопкой «📂».
         try:
             from datetime import datetime
             from models import shared_store
-            key = draft_key(brand, gy, gm)
             shared_store.put_json(key, {"posts": posts, "strategy": strategy, "author": "Джек",
                                         "created": datetime.now().strftime("%d.%m %H:%M")})
-            st.session_state["gen_month_draft_key"] = key
         except Exception:
             pass
+    return {"posts": posts, "strategy": strategy, "failed": failed, "errors": errors,
+            "draft_key": key}
+
+
+@st.fragment(run_every=3)
+def _job_panel(brand: str, gy: int, gm: int, month_label: str) -> None:
+    """Прогресс фоновой генерации. Обновляется сам, клики по странице его не сбивают."""
+    import time
+    job = _jobs().get(_job_key(brand, gy, gm))
+    if not job:
+        return
+    if job["status"] == "running":
+        mins = int((time.time() - job["started"]) // 60)
+        st.progress(min(job.get("frac", 0.0), 0.99), text=job.get("text", ""))
+        st.caption(f"⏳ Идёт {mins} мин. Генерация работает в фоне: можно кликать по странице, "
+                   "переключать разделы и даже закрыть вкладку — черновик сохранится сам.")
+        return
+    seen = f"gen_job_seen_{job['id']}"
+    if st.session_state.get(seen):
+        return
+    st.session_state[seen] = True
+    if job["status"] == "error":
+        st.error(job.get("error") or "Генерация не получилась.")
+        raw = (job.get("result") or {}).get("raw")
+        if raw:
+            st.code(raw)
+        return
+    res = job.get("result") or {}
+    st.session_state["gen_month_posts"] = res.get("posts") or []
+    st.session_state["gen_month_strategy"] = res.get("strategy") or {}
+    st.session_state["gen_month_brand"] = brand
+    st.session_state["gen_month_label"] = job.get("label", month_label)
+    st.session_state["gen_month_failed"] = res.get("failed") or []
+    st.session_state["gen_month_errors"] = res.get("errors") or []
+    if res.get("posts"):
+        st.session_state["gen_month_draft_key"] = res.get("draft_key")
+    st.rerun(scope="app")
 
 
 def _preview(brand: str, owners: dict) -> None:
