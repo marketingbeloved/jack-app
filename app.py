@@ -33,6 +33,31 @@ def _render_logo() -> None:
             return
 
 
+@st.cache_resource
+def _code_sig_holder() -> dict:
+    return {}
+
+
+def _fresh_modules() -> None:
+    """После git push Streamlit Cloud подтягивает файлы, но уже импортированные модули
+    остаются в памяти старыми. Получалась смесь старого и нового кода, и раздел падал
+    («Не удалось открыть раздел», Мария 2026-11-13). Код поменялся → выгружаем наши модули,
+    следующий import возьмёт свежие файлы."""
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent
+    try:
+        sig = max(p.stat().st_mtime for d in ("models", "views") for p in (root / d).glob("*.py"))
+    except ValueError:
+        return
+    holder = _code_sig_holder()
+    if holder.get("sig") is not None and holder["sig"] != sig:
+        for name in list(sys.modules):
+            if name.startswith(("models.", "views.")) or name in ("models", "views"):
+                sys.modules.pop(name, None)
+    holder["sig"] = sig
+
+
 def _register(pages: dict, label: str, module_name: str) -> None:
     """Import a view defensively — a view that can't load in this env is skipped, not fatal."""
     try:
@@ -49,6 +74,7 @@ def _run() -> None:
     inject_styles()
     require_login()  # shared-password gate (st.stop() until correct)
 
+    _fresh_modules()
     pages: dict = {}
     _register(pages, "📅 Content Plan", "content_plan")
     _register(pages, "✨ Monthly Content Creation", "month_plan")
@@ -94,7 +120,7 @@ def _run() -> None:
             pages[page]()
         except Exception as e:  # noqa: BLE001
             st.error("Не удалось открыть раздел. Попробуй другой или обнови страницу.")
-            st.caption(f"({type(e).__name__})")
+            st.caption(f"({type(e).__name__}: {str(e)[:200]})")
     elif not pages:
         st.error("Разделы не загрузились.")
 
