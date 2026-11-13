@@ -78,11 +78,15 @@ def render() -> None:
     n_free = plan_generator.free_slots(weeks)
     gc2.metric("Джек напишет постов", n_free,
                f"{sum(len(w) for w in weeks)} дней постинга · {len(ideas)} идей команды уже в плане")
+    to_develop = plan_generator.ideas_to_develop(ideas)
     if ideas:
-        with st.expander(f"💡 Ваши идеи на {month_label.lower()} — Джек их не трогает, а развивает "
-                         f"({len(ideas)})", expanded=False):
+        with st.expander(f"💡 Ваши идеи на {month_label.lower()} ({len(ideas)}) — "
+                         f"Джек допишет ТЗ к {len(to_develop)} без ТЗ", expanded=False):
+            st.caption("Название и дату Джек не меняет. Где ТЗ ещё нет — допишет формат, товар, "
+                       "надписи или сцены и подпись. Где ТЗ уже есть — не трогает.")
             for i in ideas:
-                st.markdown(f"- {i['date']} · {_FMT_RU.get(i['format'], 'идея')} — {i['title']}")
+                mark = "✍️ допишет ТЗ" if i in to_develop else "✅ ТЗ есть"
+                st.markdown(f"- {i['date']} · {_FMT_RU.get(i['format'], 'идея')} — {i['title']} · {mark}")
             off = [i for i in ideas
                    if date(gy, gm, int(i["date"].split(".")[0])).weekday()
                    not in plan_generator.posting_days(brand)]
@@ -90,6 +94,7 @@ def render() -> None:
                 st.caption("Не в дни постинга (" + plan_generator.posting_days_ru(brand) + "): "
                            + ", ".join(i["date"] for i in off) + ". Джек их оставит как есть.")
 
+    _idea_bank(brand)
     _offer_saved_draft(brand, gy, gm, month_label)
 
     market = st.selectbox("Рынок", ["US", "UK", "CA"], index=0, key="gen_month_market")
@@ -102,13 +107,44 @@ def render() -> None:
                  use_container_width=True, key="gen_month_go"):
         if not analysis.get("total") and not ideas:
             st.error("В базе нет прошлых месяцев — Джеку не на чем строить анализ.")
-        elif not n_free:
-            st.info("Все дни постинга этого месяца уже заняты вашими постами — писать нечего.")
+        elif not n_free and not to_develop:
+            st.info("Все дни постинга этого месяца уже заняты вашими постами с ТЗ — писать нечего.")
         else:
             _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
                       owners, month_label, ideas)
 
     _preview(brand, owners)
+
+
+def _idea_bank(brand: str) -> None:
+    """Банк идей без даты: кидаете в любой момент, Джек берёт 2-4 в каждый месяц."""
+    from models import idea_bank
+    try:
+        items = idea_bank.load(brand)
+    except Exception:
+        items = []
+    free = [i for i in items if not i.get("used")]
+    with st.expander(f"🏦 Банк идей · {brand} — свободных {len(free)}", expanded=False):
+        st.caption("Идеи без даты. При планировании месяца Джек выбирает 2-4 подходящие, "
+                   "делает из них посты и помечает, в какой месяц они ушли.")
+        txt = st.text_area("Новая идея", key="bank_new", height=70,
+                           placeholder="напр. рубрика «кот против пылесоса», серия про пожилых собак…")
+        if st.button("➕ Добавить в банк", key="bank_add"):
+            if idea_bank.add(brand, txt, by=st.session_state.get("user_name", "")):
+                st.session_state.pop("bank_new", None)
+                st.rerun()
+            else:
+                st.error("Не сохранилось — пустой текст или нет связи с базой.")
+        for i in free:
+            c1, c2 = st.columns([8, 1])
+            c1.markdown(f"- {i['text']}  \n  <span style='color:#888;font-size:0.8em'>"
+                        f"{i.get('added', '')}</span>", unsafe_allow_html=True)
+            if c2.button("✕", key=f"bank_del_{i['id']}", help="Удалить идею"):
+                idea_bank.remove(brand, i["id"])
+                st.rerun()
+        used = [i for i in items if i.get("used")]
+        if used:
+            st.caption("Уже в планах: " + "; ".join(f"{i['text'][:50]} → {i['used']}" for i in used[-10:]))
 
 
 def draft_key(brand: str, year: int, month: int) -> str:
@@ -146,10 +182,15 @@ def _offer_saved_draft(brand: str, year: int, month: int, month_label: str) -> N
 
 def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
               owners, month_label, ideas=None) -> None:
-    progress = st.progress(0.0, text="Джек читает прошлые месяцы и ваши идеи…")
+    from models import idea_bank
+    progress = st.progress(0.0, text="Джек читает ваши идеи, банк идей и прошлые месяцы…")
+    try:
+        bank = idea_bank.unused(brand)
+    except Exception:
+        bank = []
     strategy = plan_generator.month_strategy(analysis, gy, gm, brand, extra,
                                              slots=plan_generator.free_slots(weeks),
-                                             ideas=ideas)
+                                             ideas=ideas, bank=bank)
     if strategy.get("error"):
         progress.empty()
         st.error(f"Не получилось собрать стратегию: {strategy['error']}")
@@ -161,6 +202,7 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     posts: list[dict] = []
     used: list[str] = [i["title"] for i in ideas or []]
     failed: list[int] = []
+    bank_used: set[str] = set()
     for i, week in enumerate(weeks, start=1):
         if all(s.get("fixed") for s in week):
             continue                         # неделя целиком из идей команды
@@ -170,12 +212,22 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
             week, strategy, analysis, i, len(weeks), brand=brand, market=market,
             used_titles=used, extra=extra, owner_names=name_map,
             team_roles={s: m.get("role", "") for s, m in owners.items()},
-            ideas=ideas)
+            ideas=ideas,
+            bank=plan_generator._bank_for_month(strategy, bank, bank_used))
         if not got:
             failed.append(i)
             continue
         posts.extend(got)
         used.extend(p["title"] for p in got)
+        bank_used.update(p["bank_id"] for p in got if p.get("bank_id"))
+    to_develop = plan_generator.ideas_to_develop(ideas)
+    if to_develop:
+        progress.progress(len(weeks) / (len(weeks) + 1),
+                          text=f"Дописывает ТЗ к вашим идеям ({len(to_develop)})…")
+        posts.extend(plan_generator.develop_ideas(
+            to_develop, strategy, gy, brand=brand, market=market, extra=extra,
+            team_roles={s: m.get("role", "") for s, m in owners.items()}))
+        posts.sort(key=lambda p: p.get("iso", ""))
     progress.empty()
 
     st.session_state["gen_month_posts"] = posts
@@ -203,6 +255,14 @@ def _preview(brand: str, owners: dict) -> None:
 
     if strategy.get("big_idea"):
         st.info(f"**Идея месяца.** {strategy['big_idea']}")
+    if strategy.get("wishes"):
+        st.markdown("**📌 Как закрыты ваши пожелания**\n"
+                    + "\n".join(f"- {x}" for x in strategy["wishes"][:6]))
+    if strategy.get("experiments"):
+        st.markdown("**🧪 Эксперименты месяца**\n" + "\n".join(
+            f"- {e.get('hypothesis', e) if isinstance(e, dict) else e}"
+            + (f" · смотрим: {e['metric']}" if isinstance(e, dict) and e.get("metric") else "")
+            for e in strategy["experiments"][:3]))
     if strategy.get("team_ideas"):
         st.markdown("**💡 Что Джек увидел в ваших идеях**\n"
                     + "\n".join(f"- {x}" for x in strategy["team_ideas"][:5]))
@@ -218,7 +278,10 @@ def _preview(brand: str, owners: dict) -> None:
     st.markdown("**Посты**")
     for p in posts:
         owner_name = owners.get(p["owner"], {}).get("name", p["owner"])
-        head = (f'{p["date"]} · {_FMT_RU.get(p["format"], p["format"])} · {owner_name} — '
+        tags = ("💡 ваша идея · " if p.get("idea_id") else "") + \
+               ("🏦 из банка · " if p.get("bank_id") else "") + \
+               ("🧪 эксперимент · " if p.get("experiment") else "")
+        head = (f'{p["date"]} · {tags}{_FMT_RU.get(p["format"], p["format"])} · {owner_name} — '
                 f'{p["title"]}')
         with st.expander(head, expanded=False):
             if p.get("hook"):
@@ -231,6 +294,8 @@ def _preview(brand: str, owners: dict) -> None:
                 st.markdown(p["script"])
             if p.get("caption"):
                 st.markdown(f'**Подпись (EN):**\n\n{p["caption"]}')
+            if p.get("experiment"):
+                st.caption(f'🧪 Проверяем: {p["experiment"]}')
             if p.get("why"):
                 st.caption(f'Почему в плане: {p["why"]}')
 
@@ -244,10 +309,16 @@ def _preview(brand: str, owners: dict) -> None:
         res = plan_generator.commit_to_plan(posts, brand, write_briefs=with_briefs)
         if res["errors"]:
             st.error("Часть не записалась:\n" + "\n".join(f"- {e}" for e in res["errors"][:10]))
-        st.success(f"Добавлено постов: {res['added']} · ТЗ сохранено: {res['briefs']}. "
-                   f"Смотри в разделе «📅 Content Plan».")
+        try:
+            from models import idea_bank
+            idea_bank.mark_used(brand, [p.get("bank_id", "") for p in posts],
+                                st.session_state.get("gen_month_label", ""))
+        except Exception:
+            pass
+        st.success(f"Добавлено постов: {res['added']} · ТЗ к вашим идеям: {res.get('developed', 0)} · "
+                   f"ТЗ сохранено всего: {res['briefs']}. Смотри в разделе «📅 Content Plan».")
         used = st.session_state.pop("gen_month_draft_key", None)
-        if used and res["added"]:
+        if used and (res["added"] or res.get("developed")):
             from models import shared_store
             shared_store.put_json(used, {})      # залитый черновик второй раз не предлагаем
         for k in ("gen_month_posts", "gen_month_strategy", "gen_month_failed"):

@@ -241,132 +241,62 @@ def _catalog_block(brand: str = "BelovedPets", limit: int = 200, market: str = "
             "ОТСЮДА же, не выдумывай:\n" + "\n".join(lines) + "\n")
 
 
-def _month_ru(month: int) -> str:
-    return ["", "январь", "февраль", "март", "апрель", "май", "июнь", "июль",
-            "август", "сентябрь", "октябрь", "ноябрь", "декабрь"][month]
+# ─── Что команда хочет в этом месяце — ГЛАВНЫЙ сигнал (решение Марии 2026-11-13) ──
+# Раньше «Что учесть» стояло после 6000 знаков истории и тонуло. Теперь — первым блоком,
+# и каждая конкретная идея из него обязана стать постом.
+
+def _wishes_block(extra: str) -> str:
+    extra = (extra or "").strip()
+    if not extra:
+        return "ГЛАВНОЕ ОТ КОМАНДЫ НА ЭТОТ МЕСЯЦ: пожеланий нет."
+    return ("ГЛАВНОЕ ОТ КОМАНДЫ НА ЭТОТ МЕСЯЦ — ВЫПОЛНИТЬ В ПЕРВУЮ ОЧЕРЕДЬ. Каждая конкретная "
+            "идея, акция или новинка отсюда должна стать отдельным постом месяца:\n" + extra)
 
 
-def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedPets",
-                   extra: str = "", slots: int = 0, ideas: list[dict] | None = None) -> dict:
-    """One call: the month's angle, what to push, what to drop. Returns a dict, never raises."""
-    from models.plan_analytics import as_prompt_block
-
-    slots = slots or sum(len(w) for w in month_skeleton(year, month, brand=brand))
-    ideas = ideas or []
-    system = _system_prompt() + _rules_block(brand)
-    prompt = f"""\
-Ты планируешь Instagram-контент {brand} на {_month_ru(month)} {year}.
-Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
-(идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
-должна быть ровно {slots}.
-Исполнители — только Вика (графика: фото от блогера, static, carousel) и Дина (видео: reel,
-animation), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
-вместе с еженедельным «фото от блогера» графики и видео в месяце было примерно поровну.
-
-{team_ideas_block(ideas)}
-
-{as_prompt_block(analysis)}
-
-ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
-{extra or '(нет)'}
-
-Задача: дай СТРАТЕГИЮ месяца, ещё без конкретных постов. Опирайся на идеи команды и факты выше.
-Если цифр Instagram нет — так и скажи в поле `data_gaps`, не выдумывай числа.
-«Идея команды (формат в названии не указан)» в истории — это НЕ брак и не «прочее», а темы,
-придуманные командой. Их не убираем, а анализируем.
-В `drop` — только то, что ПРОВАЛИЛОСЬ по цифрам Instagram. Нет цифр — `drop` пустой.
-НЕ ХОДИ ПО КРУГУ (решение Марии): прошлые месяцы — фон, а не шаблон. Минимум ПОЛОВИНА
-постов месяца — новые форматы, идеи и темы, которых в истории выше НЕТ. `keep` — не больше
-3 пунктов. Новое бери из ресёрча ЦА, трендов и механик, которые у нас уже сработали
-(участие, награда, реакция питомца), — но в новой упаковке, а не повтором старых постов.
-
-Верни ЧИСТЫЙ JSON без обёрток:
-{{
-  "big_idea": "1-2 фразы — про что месяц, чем отличается от прошлого",
-  "team_ideas": ["что ты увидел в идеях команды (темы, товары, углы) и как новые посты их развивают"],
-  "keep": ["до 3 пунктов: что из прошлых месяцев работает и повторяем — с обоснованием из данных"],
-  "drop": ["только провалы по цифрам; нет цифр — пустой список"],
-  "new_bets": ["4-6 новых форматов/идей/тем, которых у нас ещё не было — на них минимум половина постов"],
-  "format_mix": {{"reel": 3, "carousel": 2, "static": 2, "animation": 2}},
-  "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
-  "data_gaps": ["чего не хватает, чтобы планировать точнее"]
-}}
-"""
-    out = call_claude(prompt, system, timeout=180)
-    parsed = _parse_json(out)
-    if parsed.get("error"):
-        return {"error": parsed["error"], "raw": parsed.get("raw", "")}
-    return parsed
+def _competitors_block(limit: int = 10) -> str:
+    """Хуки конкурентов из уже собранной бесплатной базы (competitor_parser.SEED_IDEAS).
+    Сеть не трогаем: свежий парсинг — только через платный Apify и с разрешения Марии."""
+    try:
+        from models.competitor_parser import SEED_IDEAS
+    except Exception:
+        return ""
+    lines = ["ЧТО РАБОТАЕТ У КОНКУРЕНТОВ (Pet Honesty, Zesty Paws, Native Pet…; база июня 2026). "
+             "Бери МЕХАНИКУ и упаковку, а не копию; названия конкурентов в посты не пиши:"]
+    for i in SEED_IDEAS[:limit]:
+        lines.append(f"  • {i.get('source', '')}: «{i.get('hook', '')}» — {i.get('views', '?')} "
+                     f"просмотров, {i.get('kind', '')}; {i.get('why', '')}")
+    return "\n".join(lines)
 
 
-def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
-                  week_no: int, total_weeks: int, *, brand: str = "BelovedPets",
-                  market: str = "US", used_titles: list[str] | None = None,
-                  extra: str = "", owner_names: dict[str, str] | None = None,
-                  team_roles: dict[str, str] | None = None,
-                  ideas: list[dict] | None = None) -> list[dict]:
-    """Fill one week's FREE slots with real posts — hook, script, caption. Returns [] on failure.
+def _bank_for_month(strategy: dict, bank: list[dict], used_ids: set[str]) -> list[dict]:
+    """Идеи банка, которые стратегия выбрала на месяц и которые ещё не стали постами."""
+    chosen = {str(x) for x in (strategy.get("bank_ids") or [])}
+    return [i for i in bank if i["id"] in chosen and i["id"] not in used_ids]
 
-    Slots marked `fixed` (the team already put a post there) are shown to the model as
-    context and never written over.
-    """
-    from models.plan_analytics import as_prompt_block, _FORMAT_LABELS
 
-    fixed = [s for s in week_slots if s.get("fixed")]
-    week_slots = [s for s in week_slots if not s.get("fixed")]
-    if not week_slots:
-        return []
-    used = used_titles or []
-    names = owner_names or {}
-    theme = ""
-    themes = strategy.get("weekly_themes") or []
-    if week_no - 1 < len(themes):
-        theme = themes[week_no - 1]
+def _experiments_block(strategy: dict) -> str:
+    exps = strategy.get("experiments") or []
+    if not exps:
+        return ""
+    lines = ["ЭКСПЕРИМЕНТЫ МЕСЯЦА — каждый проверяется одним постом; у такого поста заполни "
+             "поле `experiment` текстом гипотезы (дословно отсюда):"]
+    for e in exps[:3]:
+        h = e.get("hypothesis") if isinstance(e, dict) else str(e)
+        lines.append(f"  • {h}")
+    return "\n".join(lines)
 
-    def who(slug: str) -> str:
-        return names.get(slug) or (slug.title() if slug else "исполнитель")
 
-    slot_lines = []
-    for s in week_slots:
-        if s["format"] == "blogger_photo":
-            slot_lines.append(
-                f'- {s["date"]} ({s["weekday"]}) — ЗАФИКСИРОВАНО: «фото от блогера», '
-                f'исполнитель {who(s["owner"])}. title: "фото от блогера · <товар в 2-4 словах>".')
-        else:
-            slot_lines.append(
-                f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
-                f'Выбери формат: carousel / static / animation / reel.')
-    fixed_lines = [f'- {s["date"]} ({s["weekday"]}) — ЗАНЯТО идеей команды: «{i["title"]}» '
-                   f'[{_FORMAT_LABELS.get(i["format"], i["format"])}]. Не пиши для этого дня.'
-                   for s in fixed for i in s["fixed"]]
+def _bank_prompt(bank: list[dict] | None, week: bool = False) -> str:
+    from models.idea_bank import prompt_block
+    if week and not bank:
+        return ""
+    head = ("ИДЕИ ИЗ БАНКА, ВЗЯТЫЕ НА МЕСЯЦ и ещё не ставшие постами — если идея подходит "
+            "к слотам этой недели, сделай из неё пост и поставь её id в `bank_id`:\n") if week else ""
+    return head + prompt_block(bank or [])
 
-    system = _system_prompt() + _rules_block(brand)
-    prompt = f"""\
-Пишешь НЕДЕЛЮ {week_no} из {total_weeks} контент-плана {brand} на {_month_ru(int(week_slots[0]["date"].split(".")[1]))}.
 
-СТРАТЕГИЯ МЕСЯЦА (её же и держись):
-{json.dumps(strategy, ensure_ascii=False, indent=2)[:2500]}
-
-Тема этой недели: {theme or '(выведи сам из стратегии)'}
-
-{as_prompt_block(analysis)[:6000]}
-
-ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ОТ КОМАНДЫ:
-{extra or '(нет)'}
-
-{_catalog_block(brand, market=market)}
-{team_ideas_block(ideas or [])}
-
-Уже занятые темы в этом месяце — НЕ повторяй:
-{'; '.join(used[-40:]) or '(пока пусто)'}
-
-СЛОТЫ НЕДЕЛИ (ровно столько постов, ни больше ни меньше, даты не меняй):
-{chr(10).join(slot_lines)}
-{('Уже стоит в этой неделе (контекст, НЕ пиши):' + chr(10) + chr(10).join(fixed_lines)) if fixed_lines else ''}
-
-Рынок: {market}.
-
-Правила:
+def _post_rules() -> str:
+    return f"""Правила:
 - Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
   не ставь три рилса подряд, чередуй carousel / static / animation / reel.
 - ВАЖНО ПРО «фото от блогера». Ты выбираешь, КАКОЙ ТОВАР показать, а фото с этим товаром
@@ -430,6 +360,157 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 - Список запретов в сам текст ТЗ НЕ переписывай — исполнителю он не нужен, а в ТЗ создаёт
   видимость нарушений. Просто соблюдай.
 - Не выдумывай скидки, цены и промо, которых нет в контексте выше.
+"""
+
+
+def _month_ru(month: int) -> str:
+    return ["", "январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+            "август", "сентябрь", "октябрь", "ноябрь", "декабрь"][month]
+
+
+def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedPets",
+                   extra: str = "", slots: int = 0, ideas: list[dict] | None = None,
+                   bank: list[dict] | None = None) -> dict:
+    """One call: the month's angle, what to push, what to drop. Returns a dict, never raises."""
+    from models.plan_analytics import as_prompt_block
+
+    slots = slots or sum(len(w) for w in month_skeleton(year, month, brand=brand))
+    ideas = ideas or []
+    system = _system_prompt() + _rules_block(brand)
+    prompt = f"""\
+Ты планируешь Instagram-контент {brand} на {_month_ru(month)} {year}.
+
+{_wishes_block(extra)}
+
+Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
+(идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
+должна быть ровно {slots}.
+Исполнители — только Вика (графика: фото от блогера, static, carousel) и Дина (видео: reel,
+animation), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
+вместе с еженедельным «фото от блогера» графики и видео в месяце было примерно поровну.
+
+{team_ideas_block(ideas)}
+
+{_bank_prompt(bank)}
+
+{_competitors_block()}
+
+ИСТОРИЯ — это ФОН: что уже было и что сработало по цифрам. НЕ шаблон для копирования.
+{as_prompt_block(analysis)}
+
+Задача: дай СТРАТЕГИЮ месяца, ещё без конкретных постов. Порядок важности: пожелания
+команды → идеи команды в плане и в банке → новые заходы (конкуренты, тренды, эксперименты)
+→ и только потом история.
+БАНК ИДЕЙ: выбери из банка 2-4 идеи, которые лучше всего ложатся на месяц, и верни их id в
+`bank_ids` (если банк пуст — пустой список).
+ЭКСПЕРИМЕНТЫ: придумай 2-3 гипотезы, которые мы ещё НЕ проверяли (новый формат, новый тип
+хука, новая тема, новая механика вовлечения). Каждая — одной фразой «если …, то …» и с
+метрикой, по которой поймём результат (просмотры / сохранения / комментарии / репосты).
+Посмотри в истории блок «ПРОШЛЫЕ ЭКСПЕРИМЕНТЫ»: что сработало — развивай, что нет — не повторяй.
+Если цифр Instagram нет — так и скажи в поле `data_gaps`, не выдумывай числа.
+«Идея команды (формат в названии не указан)» в истории — это НЕ брак и не «прочее», а темы,
+придуманные командой. Их не убираем, а анализируем.
+В `drop` — только то, что ПРОВАЛИЛОСЬ по цифрам Instagram. Нет цифр — `drop` пустой.
+НЕ ХОДИ ПО КРУГУ (решение Марии): прошлые месяцы — фон, а не шаблон. Минимум ПОЛОВИНА
+постов месяца — новые форматы, идеи и темы, которых в истории выше НЕТ. `keep` — не больше
+3 пунктов. Новое бери из ресёрча ЦА, трендов и механик, которые у нас уже сработали
+(участие, награда, реакция питомца), — но в новой упаковке, а не повтором старых постов.
+
+Верни ЧИСТЫЙ JSON без обёрток:
+{{
+  "big_idea": "1-2 фразы — про что месяц, чем отличается от прошлого",
+  "team_ideas": ["что ты увидел в идеях команды (темы, товары, углы) и как новые посты их развивают"],
+  "wishes": ["как закрыт каждый пункт из «ГЛАВНОЕ ОТ КОМАНДЫ»"],
+  "bank_ids": ["id идей из банка, которые берём в этот месяц"],
+  "experiments": [{{"hypothesis": "если …, то …", "metric": "сохранения"}}],
+  "keep": ["до 3 пунктов: что из прошлых месяцев работает и повторяем — с обоснованием из данных"],
+  "drop": ["только провалы по цифрам; нет цифр — пустой список"],
+  "new_bets": ["4-6 новых форматов/идей/тем, которых у нас ещё не было — на них минимум половина постов"],
+  "format_mix": {{"reel": 3, "carousel": 2, "static": 2, "animation": 2}},
+  "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
+  "data_gaps": ["чего не хватает, чтобы планировать точнее"]
+}}
+"""
+    out = call_claude(prompt, system, timeout=180)
+    parsed = _parse_json(out)
+    if parsed.get("error"):
+        return {"error": parsed["error"], "raw": parsed.get("raw", "")}
+    return parsed
+
+
+def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
+                  week_no: int, total_weeks: int, *, brand: str = "BelovedPets",
+                  market: str = "US", used_titles: list[str] | None = None,
+                  extra: str = "", owner_names: dict[str, str] | None = None,
+                  team_roles: dict[str, str] | None = None,
+                  ideas: list[dict] | None = None,
+                  bank: list[dict] | None = None) -> list[dict]:
+    """Fill one week's FREE slots with real posts — hook, script, caption. Returns [] on failure.
+
+    Slots marked `fixed` (the team already put a post there) are shown to the model as
+    context and never written over.
+    """
+    from models.plan_analytics import as_prompt_block, _FORMAT_LABELS
+
+    fixed = [s for s in week_slots if s.get("fixed")]
+    week_slots = [s for s in week_slots if not s.get("fixed")]
+    if not week_slots:
+        return []
+    used = used_titles or []
+    names = owner_names or {}
+    theme = ""
+    themes = strategy.get("weekly_themes") or []
+    if week_no - 1 < len(themes):
+        theme = themes[week_no - 1]
+
+    def who(slug: str) -> str:
+        return names.get(slug) or (slug.title() if slug else "исполнитель")
+
+    slot_lines = []
+    for s in week_slots:
+        if s["format"] == "blogger_photo":
+            slot_lines.append(
+                f'- {s["date"]} ({s["weekday"]}) — ЗАФИКСИРОВАНО: «фото от блогера», '
+                f'исполнитель {who(s["owner"])}. title: "фото от блогера · <товар в 2-4 словах>".')
+        else:
+            slot_lines.append(
+                f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
+                f'Выбери формат: carousel / static / animation / reel.')
+    fixed_lines = [f'- {s["date"]} ({s["weekday"]}) — ЗАНЯТО идеей команды: «{i["title"]}» '
+                   f'[{_FORMAT_LABELS.get(i["format"], i["format"])}]. Не пиши для этого дня.'
+                   for s in fixed for i in s["fixed"]]
+
+    system = _system_prompt() + _rules_block(brand)
+    prompt = f"""\
+Пишешь НЕДЕЛЮ {week_no} из {total_weeks} контент-плана {brand} на {_month_ru(int(week_slots[0]["date"].split(".")[1]))}.
+
+{_wishes_block(extra)}
+
+СТРАТЕГИЯ МЕСЯЦА (её же и держись):
+{json.dumps(strategy, ensure_ascii=False, indent=2)[:2500]}
+
+Тема этой недели: {theme or '(выведи сам из стратегии)'}
+
+{_bank_prompt(bank, week=True)}
+
+{_experiments_block(strategy)}
+
+ИСТОРИЯ (кратко, ФОН — не шаблон; не повторяй структуру прошлых постов):
+{as_prompt_block(analysis)[:2500]}
+
+{_catalog_block(brand, market=market)}
+{team_ideas_block(ideas or [])}
+
+Уже занятые темы в этом месяце — НЕ повторяй:
+{'; '.join(used[-40:]) or '(пока пусто)'}
+
+СЛОТЫ НЕДЕЛИ (ровно столько постов, ни больше ни меньше, даты не меняй):
+{chr(10).join(slot_lines)}
+{('Уже стоит в этой неделе (контекст, НЕ пиши):' + chr(10) + chr(10).join(fixed_lines)) if fixed_lines else ''}
+
+Рынок: {market}.
+
+{_post_rules()}
 
 Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
 {{"posts": [
@@ -438,6 +519,8 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
     "product": "какой SKU в кадре", "hook": "English hook",
     "cover": "обложка (только видео)", "script": "надписи / сцены", "caption": "English caption",
+    "bank_id": "id идеи из банка, если пост из неё вырос, иначе пусто",
+    "experiment": "гипотеза эксперимента, если пост её проверяет, иначе пусто",
     "why": "обоснование из данных"}}
 ]}}
 """
@@ -448,6 +531,83 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     posts = parsed.get("posts") or []
     return _normalise(posts, week_slots, team_roles, brand, market)
 
+
+def ideas_to_develop(ideas: list[dict]) -> list[dict]:
+    """Идеи команды в ячейках месяца, у которых ещё нет ТЗ, — их Джек разворачивает в посты."""
+    return [i for i in ideas or [] if i.get("id") and not (i.get("brief") or "").strip()]
+
+
+def develop_ideas(ideas: list[dict], strategy: dict, year: int, *, brand: str = "BelovedPets",
+                  market: str = "US", extra: str = "",
+                  team_roles: dict[str, str] | None = None) -> list[dict]:
+    """Развернуть идеи команды из ячеек плана в полноценные посты (решение Марии 2026-11-13).
+
+    Раньше Джек дни с идеями команды просто пропускал: в плане оставалось одно название
+    без товара и ТЗ. Теперь название и дата остаются как у команды, а Джек дописывает
+    формат, товар, надписи / сцены и подпись. Пишем пачками по 6, чтобы ответ не обрезался.
+    """
+    from models.plan_analytics import _FORMAT_LABELS
+    out: list[dict] = []
+    for k in range(0, len(ideas), 6):
+        chunk = ideas[k:k + 6]
+        lines = [f'- [{i["id"]}] {i["date"]} — «{i["title"]}»'
+                 + (f' [формат по названию: {_FORMAT_LABELS.get(i["format"], i["format"])}]'
+                    if i.get("format") in _ALLOWED_FORMATS else "")
+                 for i in chunk]
+        prompt = f"""\
+Команда сама придумала эти посты и поставила их в контент-план {brand}. Сейчас у каждого
+только название. Твоя задача — РАЗВЕРНУТЬ каждую идею в готовый пост, сохранив её смысл.
+
+{_wishes_block(extra)}
+
+СТРАТЕГИЯ МЕСЯЦА (для контекста):
+{json.dumps(strategy, ensure_ascii=False, indent=2)[:1500]}
+
+{_catalog_block(brand, market=market)}
+
+ИДЕИ КОМАНДЫ (id в квадратных скобках):
+{chr(10).join(lines)}
+
+Как разворачивать:
+- `date` и `title` — РОВНО как у команды, не меняй ни слова. В `idea_id` — id идеи.
+- Смысл идеи — главный. Не подменяй её своей. Можно усилить хук и упаковку.
+- Формат: если он понятен из названия — бери его; иначе выбери сам
+  (carousel / static / animation / reel). «фото от блогера» оставляй только если так в названии.
+- Товар выбери из каталога, если идея про товар или товар естественно в неё ложится.
+  Идея про бренд в целом — `product` «вся линейка».
+
+{_post_rules()}
+
+Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
+{{"posts": [
+  {{"idea_id": "id", "date": "дата как у команды", "title": "название как у команды",
+    "type": "engaging|selling|viral", "format": "reel|animation|carousel|static|blogger_photo",
+    "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
+    "product": "какой SKU в кадре", "hook": "English hook",
+    "cover": "обложка (только видео)", "script": "надписи / сцены", "caption": "English caption",
+    "why": "как пост раскрывает идею команды"}}
+]}}
+"""
+        parsed = _parse_json(call_claude(prompt, _system_prompt() + _rules_block(brand), timeout=300))
+        if parsed.get("error"):
+            continue
+        got = {str(p.get("idea_id")): p for p in parsed.get("posts") or [] if isinstance(p, dict)}
+        for i in chunk:
+            post = got.get(i["id"])
+            if not post:
+                continue
+            d, m = (int(x) for x in i["date"].split(".")[:2])
+            slot = {"date": i["date"], "iso": date(year, m, d).isoformat(),
+                    "weekday": WEEKDAY_RU[date(year, m, d).weekday()],
+                    "format": "blogger_photo" if i.get("format") == "blogger_photo" else "",
+                    "owner": i.get("owner") or ""}
+            post["date"] = i["date"]
+            norm = _normalise([post], [slot], team_roles, brand, market)
+            if norm:
+                norm[0]["title"] = i["title"]          # название команды — дословно
+                norm[0]["idea_id"] = i["id"]
+                out.append(norm[0])
+    return out
 
 def _check_product(name: str, brand: str) -> str:
     """Товар из ответа модели → точное название из каталога, или пометка, что его нет.
@@ -539,6 +699,8 @@ def _normalise(posts: list[dict], slots: list[dict],
             "product_url": _product_link(product, brand, market),
             "hook": (post.get("hook") or "").strip(),
             "cover": (post.get("cover") or "").strip(),
+            "bank_id": str(post.get("bank_id") or "").strip(),
+            "experiment": (post.get("experiment") or "").strip()[:200],
             "script": _clean_md(post.get("script") or ""),
             "caption": limit_hashtags((post.get("caption") or "").strip()),
             "why": (post.get("why") or "").strip(),
@@ -594,15 +756,38 @@ def commit_to_plan(posts: list[dict], brand: str = "BelovedPets",
     entries: dict[str, dict] = {}
     added = 0
 
+    existing = plan_briefs.load_all() or {}
+    developed = 0
     for p in posts:
+        if p.get("idea_id"):
+            # Идея команды: ячейку не создаём, а дописываем к ней ТЗ. Уже есть ТЗ — не трогаем.
+            item = next((x for x in plan.get(p["date"], []) if x.get("id") == p["idea_id"]), None)
+            if not item or (existing.get(p["idea_id"]) or {}).get("text") or p["idea_id"] in entries:
+                continue
+            for f in ("format", "owner"):
+                if not item.get(f) and p.get(f):
+                    item[f] = p[f]
+            body = _brief_text(p) if write_briefs else ""
+            if body:
+                entries[p["idea_id"]] = {"text": body, "link": "", "title": item.get("title", ""),
+                                         "pillar": item.get("pillar", ""),
+                                         "for": item.get("owner") or p.get("owner", "dina"),
+                                         "updated": stamp, "wish": ""}
+                developed += 1
+            continue
         try:
             day = plan.setdefault(p["date"], [])
             if any(x.get("title") == p["title"] for x in day):
                 continue                     # повторное нажатие не плодит дубли
             pid = f"{brand[:2].lower()}{p['date'].replace('.', '')}{uuid.uuid4().hex[:3]}"
-            day.append({"id": pid, "title": p["title"].strip(), "type": p["type"],
-                        "pillar": p.get("pillar", "").strip(), "owner": p.get("owner", ""),
-                        "format": p.get("format", "")})
+            item = {"id": pid, "title": p["title"].strip(), "type": p["type"],
+                    "pillar": p.get("pillar", "").strip(), "owner": p.get("owner", ""),
+                    "format": p.get("format", "")}
+            if p.get("experiment"):
+                item["experiment"] = p["experiment"]
+            if p.get("bank_id"):
+                item["bank_id"] = p["bank_id"]
+            day.append(item)
             added += 1
         except Exception as e:
             errors.append(f'{p.get("date")}: {e}')
@@ -618,9 +803,9 @@ def commit_to_plan(posts: list[dict], brand: str = "BelovedPets",
         plan_briefs.save_many(entries)
     except Exception as e:
         return {"added": 0, "briefs": 0, "errors": [f"ТЗ не сохранились: {e}"]}
-    if added:
+    if added or developed:
         _save_plan(brand, plan)
-    return {"added": added, "briefs": len(entries), "errors": errors}
+    return {"added": added, "developed": developed, "briefs": len(entries), "errors": errors}
 
 
 _FORMAT_RU = {"reel": "Reel / видео", "carousel": "Карусель", "animation": "Анимация (оживление фото)",

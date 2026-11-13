@@ -100,6 +100,7 @@ def month_posts(brand: str, month: str) -> list[dict]:
         for p in cell or []:
             brief = ((briefs.get(p.get("id", "")) or {}).get("text") or "").strip()
             out.append({
+                "id": p.get("id", ""),
                 "date": date_key,
                 "title": p.get("title", ""),
                 "type": p.get("type", "neutral"),
@@ -179,6 +180,7 @@ def collect(brand: str = "BelovedPets", months: list[str] | None = None) -> dict
                 "owner": p.get("owner", "") or "",
                 "format": detect_format(title, brief.get("text") or "", p.get("owner", "")),
                 "brief": (brief.get("text") or "").strip(),
+                "experiment": p.get("experiment", ""),
             })
 
     by_format = Counter(p["format"] for p in posts)
@@ -265,6 +267,7 @@ def _metrics(brand: str, months: list[str], posts: list[dict]) -> dict:
         "avg_comments": avg(scope, "comments"),
         "avg_likes": avg(scope, "likes"),
         "per_format": per_format,
+        "views_by_post": {f"{x['date']}|{x['title']}": x.get("views", 0) for x in matched},
         "top": [{k: t.get(k) for k in ("date", "title", "format", "views", "likes", "comments")} for t in top],
         "flop": [{k: t.get(k) for k in ("date", "title", "format", "views", "likes", "comments")} for t in flop],
     }
@@ -323,6 +326,16 @@ def as_prompt_block(a: dict) -> str:
     else:
         lines += ["", "ЦИФРЫ INSTAGRAM: выгрузка не загружена. Опирайся на структуру плана и "
                       "здравый смысл, и НЕ выдумывай числа просмотров — их нет."]
+
+    exps = [p for p in a["posts"] if p.get("experiment")]
+    if exps:
+        views = (m or {}).get("views_by_post") or {}
+        avg = m.get("avg_views") if m else None
+        lines += ["", "ПРОШЛЫЕ ЭКСПЕРИМЕНТЫ (что проверяли и чем кончилось):"]
+        for p in exps[:12]:
+            v = views.get(f"{p['date']}|{p['title']}")
+            res = (f"{v} просмотров при среднем {avg}" if v and avg else "цифр пока нет")
+            lines.append(f"  - {p['date']} «{p['title']}» — гипотеза: {p['experiment']} → {res}")
 
     themes = [p["title"] for p in a["posts"]]
     lines += ["", "ВСЕ темы за период (не повторять дословно, но видеть, что уже отработано):",
