@@ -127,21 +127,35 @@ def _idea_bank(brand: str) -> None:
     with st.expander(f"🏦 Банк идей · {brand} — свободных {len(free)}", expanded=False):
         st.caption("Идеи без даты. При планировании месяца Джек выбирает 2-4 подходящие, "
                    "делает из них посты и помечает, в какой месяц они ушли.")
-        txt = st.text_area("Новая идея", key="bank_new", height=70,
-                           placeholder="напр. рубрика «кот против пылесоса», серия про пожилых собак…")
-        if st.button("➕ Добавить в банк", key="bank_add"):
-            if idea_bank.add(brand, txt, by=st.session_state.get("user_name", "")):
+        txt = st.text_area("Новая идея — текст или ссылка на рилс (Instagram / TikTok)",
+                           key="bank_new", height=80,
+                           placeholder="напр. рубрика «кот против пылесоса»\n"
+                                       "или https://www.instagram.com/reel/… + пару слов, что понравилось")
+        if st.button("➕ Добавить в банк — Джек разберёт", key="bank_add"):
+            has_link = "http" in (txt or "")
+            with st.spinner("🐾 Джек смотрит ролик и думает, как адаптировать нам…" if has_link
+                            else "🐾 Джек думает, как адаптировать идею нам…"):
+                item = idea_bank.add(brand, txt, by=st.session_state.get("user_name", ""))
+            if item:
                 st.session_state.pop("bank_new", None)
                 st.rerun()
             else:
                 st.error("Не сохранилось — пустой текст или нет связи с базой.")
         for i in free:
-            c1, c2 = st.columns([8, 1])
-            c1.markdown(f"- {i['text']}  \n  <span style='color:#888;font-size:0.8em'>"
+            c1, c2, c3 = st.columns([8, 1, 1])
+            label = ("🔗 " if i.get("url") else "💬 ") + i["text"]
+            c1.markdown(f"**{label[:160]}**  \n<span style='color:#888;font-size:0.8em'>"
                         f"{i.get('added', '')}</span>", unsafe_allow_html=True)
-            if c2.button("✕", key=f"bank_del_{i['id']}", help="Удалить идею"):
+            if c2.button("🔄", key=f"bank_re_{i['id']}", help="Разобрать заново"):
+                with st.spinner("🐾 Джек разбирает заново…"):
+                    idea_bank.reanalyse(brand, i["id"])
+                st.rerun()
+            if c3.button("✕", key=f"bank_del_{i['id']}", help="Удалить идею"):
                 idea_bank.remove(brand, i["id"])
                 st.rerun()
+            if i.get("analysis"):
+                with st.expander("🐾 Разбор Джека: почему зашло и как адаптировать нам"):
+                    st.markdown(i["analysis"])
         used = [i for i in items if i.get("used")]
         if used:
             st.caption("Уже в планах: " + "; ".join(f"{i['text'][:50]} → {i['used']}" for i in used[-10:]))
