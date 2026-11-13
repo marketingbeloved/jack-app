@@ -390,9 +390,14 @@ def _parse_json(text: str) -> dict:
     # Снять ```json … ``` обёртку, если есть
     t = re.sub(r"^```(?:json)?\s*", "", t)
     t = re.sub(r"\s*```$", "", t).strip()
-    # 1) Попробовать распарсить целиком
+    # 1) Попробовать распарсить целиком. Модель иногда отдаёт голый список постов —
+    # заворачиваем в {"posts": [...]}, иначе вызывающий падал на .get (Мария, 2026-11-13).
     try:
-        return json.loads(t)
+        got = json.loads(t)
+        if isinstance(got, dict):
+            return got
+        if isinstance(got, list):
+            return {"posts": got}
     except Exception:
         pass
     # 2) Выдернуть самый большой {...}-блок
@@ -400,7 +405,8 @@ def _parse_json(text: str) -> dict:
     if not m:
         return {"error": "no JSON in response", "raw": text[:400]}
     try:
-        return json.loads(m.group(0))
+        got = json.loads(m.group(0))
+        return got if isinstance(got, dict) else {"error": "JSON не объект", "raw": text[:400]}
     except json.JSONDecodeError as e:
         return {"error": f"JSON parse: {e}", "raw": text[:400]}
 

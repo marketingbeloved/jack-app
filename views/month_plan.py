@@ -217,17 +217,22 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     used: list[str] = [i["title"] for i in ideas or []]
     failed: list[int] = []
     bank_used: set[str] = set()
+    errors: list[str] = []
     for i, week in enumerate(weeks, start=1):
         if all(s.get("fixed") for s in week):
             continue                         # неделя целиком из идей команды
         progress.progress(i / (len(weeks) + 1),
                           text=f"Неделя {i} из {len(weeks)} — пишет посты, хуки и скрипты…")
-        got = plan_generator.generate_week(
-            week, strategy, analysis, i, len(weeks), brand=brand, market=market,
-            used_titles=used, extra=extra, owner_names=name_map,
-            team_roles={s: m.get("role", "") for s, m in owners.items()},
-            ideas=ideas,
-            bank=plan_generator._bank_for_month(strategy, bank, bank_used))
+        try:
+            got = plan_generator.generate_week(
+                week, strategy, analysis, i, len(weeks), brand=brand, market=market,
+                used_titles=used, extra=extra, owner_names=name_map,
+                team_roles={s: m.get("role", "") for s, m in owners.items()},
+                ideas=ideas,
+                bank=plan_generator._bank_for_month(strategy, bank, bank_used))
+        except Exception as e:  # noqa: BLE001 — одна неделя не должна ронять весь месяц
+            errors.append(f"неделя {i}: {type(e).__name__}: {str(e)[:150]}")
+            got = []
         if not got:
             failed.append(i)
             continue
@@ -238,9 +243,12 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     if to_develop:
         progress.progress(len(weeks) / (len(weeks) + 1),
                           text=f"Дописывает ТЗ к вашим идеям ({len(to_develop)})…")
-        posts.extend(plan_generator.develop_ideas(
-            to_develop, strategy, gy, brand=brand, market=market, extra=extra,
-            team_roles={s: m.get("role", "") for s, m in owners.items()}))
+        try:
+            posts.extend(plan_generator.develop_ideas(
+                to_develop, strategy, gy, brand=brand, market=market, extra=extra,
+                team_roles={s: m.get("role", "") for s, m in owners.items()}))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"идеи команды: {type(e).__name__}: {str(e)[:150]}")
         posts.sort(key=lambda p: p.get("iso", ""))
     progress.empty()
 
@@ -249,6 +257,19 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
     st.session_state["gen_month_brand"] = brand
     st.session_state["gen_month_label"] = month_label
     st.session_state["gen_month_failed"] = failed
+    st.session_state["gen_month_errors"] = errors
+    # Черновик — сразу в общую базу: если страница упадёт или вкладка закроется, план не
+    # пропадёт, а появится кнопкой «📂 Открыть черновик».
+    if posts:
+        try:
+            from datetime import datetime
+            from models import shared_store
+            key = draft_key(brand, gy, gm)
+            shared_store.put_json(key, {"posts": posts, "strategy": strategy, "author": "Джек",
+                                        "created": datetime.now().strftime("%d.%m %H:%M")})
+            st.session_state["gen_month_draft_key"] = key
+        except Exception:
+            pass
 
 
 def _preview(brand: str, owners: dict) -> None:
@@ -264,6 +285,8 @@ def _preview(brand: str, owners: dict) -> None:
     if failed:
         st.warning(f"Недели {', '.join(map(str, failed))} не сгенерировались — Джек не вернул "
                    f"валидный ответ. Их в черновике нет; можно перезапустить генерацию.")
+    for err in st.session_state.get("gen_month_errors") or []:
+        st.caption(f"⚙️ {err}")
     if st.session_state.get("gen_month_brand") != brand:
         st.warning("Черновик сделан для другого бренда — перегенерируй, прежде чем заливать.")
 

@@ -643,6 +643,19 @@ def _product_link(name: str, brand: str, market: str = "US") -> str:
         return ""
 
 
+def _s(v) -> str:
+    """Поле поста строкой: модель иногда присылает список или объект вместо текста."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return "\n".join(_s(x) for x in v)
+    if isinstance(v, dict):
+        return " · ".join(f"{k}: {_s(x)}" for k, x in v.items())
+    return str(v)
+
+
 def _normalise(posts: list[dict], slots: list[dict],
                team_roles: dict[str, str] | None = None,
                brand: str = "BelovedPets", market: str = "US") -> list[dict]:
@@ -666,12 +679,12 @@ def _normalise(posts: list[dict], slots: list[dict],
             continue
         queue.remove(post)
 
-        fmt = (post.get("format") or "").strip().lower()
+        fmt = (_s(post.get("format"))).strip().lower()
         if slot["format"] == "blogger_photo":
             fmt = "blogger_photo"
         elif fmt not in _ALLOWED_FORMATS or fmt == "blogger_photo":
             fmt = "reel"
-        ptype = (post.get("type") or "").strip().lower()
+        ptype = (_s(post.get("type"))).strip().lower()
         if ptype not in _ALLOWED_TYPES:
             ptype = "engaging"
 
@@ -681,8 +694,8 @@ def _normalise(posts: list[dict], slots: list[dict],
         if fmt != "blogger_photo" and team_roles:
             owner = owner_for_format(fmt, team_roles, owner)
 
-        product = _check_product(post.get("product") or "", brand)[:160]
-        title = (post.get("title") or "").strip()[:120] or "(без темы)"
+        product = _check_product(_s(post.get("product")), brand)[:160]
+        title = (_s(post.get("title"))).strip()[:120] or "(без темы)"
         if fmt == "blogger_photo":
             title = _blogger_title(title, product)
 
@@ -694,16 +707,16 @@ def _normalise(posts: list[dict], slots: list[dict],
             "type": ptype,
             "format": fmt,
             "owner": owner,
-            "pillar": (post.get("pillar") or "").strip()[:60],
+            "pillar": (_s(post.get("pillar"))).strip()[:60],
             "product": product,
             "product_url": _product_link(product, brand, market),
-            "hook": (post.get("hook") or "").strip(),
-            "cover": (post.get("cover") or "").strip(),
-            "bank_id": str(post.get("bank_id") or "").strip(),
-            "experiment": (post.get("experiment") or "").strip()[:200],
-            "script": _clean_md(post.get("script") or ""),
-            "caption": limit_hashtags((post.get("caption") or "").strip()),
-            "why": (post.get("why") or "").strip(),
+            "hook": (_s(post.get("hook"))).strip(),
+            "cover": (_s(post.get("cover"))).strip(),
+            "bank_id": str(_s(post.get("bank_id"))).strip(),
+            "experiment": (_s(post.get("experiment"))).strip()[:200],
+            "script": _clean_md(_s(post.get("script"))),
+            "caption": limit_hashtags((_s(post.get("caption"))).strip()),
+            "why": (_s(post.get("why"))).strip(),
         })
     return out
 
