@@ -295,9 +295,11 @@ def _bank_prompt(bank: list[dict] | None, week: bool = False) -> str:
     return head + prompt_block(bank or [])
 
 
-def _post_rules() -> str:
+def _post_rules(year: int | None = None) -> str:
+    yr = (f"- Год публикаций — {year}. В подписях и надписях другой год НЕ упоминай "
+          f"(лучше вообще без года, кроме «{year}» там, где это к месту).\n") if year else ""
     return f"""Правила:
-- Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
+{yr}- Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
   не ставь три рилса подряд, чередуй carousel / static / animation / reel.
 - ВАЖНО ПРО «фото от блогера». Ты выбираешь, КАКОЙ ТОВАР показать, а фото с этим товаром
   Маша подберёт на Диске сама. Что на фото (животное, поза, обстановка) — не придумывай.
@@ -514,7 +516,8 @@ animation), нагрузка 50/50. Подбирай `format_mix` так, что
     parsed = _parse_json(out)
     if parsed.get("error"):
         return {"error": parsed["error"], "raw": parsed.get("raw", "")}
-    return _review_strategy(parsed, analysis, brand, month, extra, recent) or parsed
+    parsed = normalise_strategy(parsed)
+    return normalise_strategy(_review_strategy(parsed, analysis, brand, month, extra, recent) or parsed)
 
 
 def _review_strategy(draft: dict, analysis: dict, brand: str, month: int, extra: str,
@@ -544,7 +547,9 @@ Instagram на {_month_ru(month)} от твоего SMM. Твоя задача �
 концепт по той же схеме полей). Сильные — можешь усилить инсайт и хуки.
 Проверь, что пожелания команды закрыты, а концепты покрывают разные сегменты ЦА.
 
-Верни ЧИСТЫЙ JSON без обёрток: ПОЛНУЮ исправленную стратегию в той же схеме, что черновик,
+Верни ЧИСТЫЙ JSON без обёрток: ПОЛНУЮ исправленную стратегию в той же схеме, что черновик
+(концепт = name / segment / insight / idea / why_us / products / formats / hooks /
+new_vs_history — это НЕ пост: без сцен, подписей и ссылок; team_ideas — список строк),
 плюс поле "review": [{{"concept": "имя", "scores": {{"insight": 4, "brand": 5, "novelty": 3,
 "simple": 5, "stopping": 4}}, "verdict": "оставлен / усилен / заменён на «…» — почему"}}].
 """
@@ -557,6 +562,62 @@ Instagram на {_month_ru(month)} от твоего SMM. Твоя задача �
     for k, v in draft.items():                 # то, что ревьюер забыл вернуть, — из черновика
         parsed.setdefault(k, v)
     return parsed
+
+
+_LIST_KEYS = ("team_ideas", "wishes", "keep", "drop", "new_bets", "data_gaps", "weekly_themes",
+              "bank_ids", "experiments", "audience", "concepts", "review")
+_CONCEPT_ALIASES = {
+    "name": ("name", "title", "concept", "название", "имя"),
+    "segment": ("segment", "audience", "for_whom", "для_кого", "сегмент"),
+    "insight": ("insight", "инсайт", "why_it_works"),
+    "idea": ("idea", "angle", "идея", "description"),
+    "why_us": ("why_us", "почему_мы", "usp"),
+    "products": ("products", "product", "товары", "товар"),
+    "formats": ("formats", "format", "форматы"),
+    "hooks": ("hooks", "hook", "хуки", "хук"),
+    "new_vs_history": ("new_vs_history", "novelty", "новизна"),
+}
+
+
+def _norm_concept(c) -> dict | None:
+    """Концепт в нашей схеме. Модель иногда присылает его «как пост» (title / angle / hook)."""
+    if isinstance(c, str):
+        return {"name": c.strip()[:80], "idea": c.strip()} if c.strip() else None
+    if not isinstance(c, dict):
+        return None
+    out = {}
+    for key, names in _CONCEPT_ALIASES.items():
+        v = next((c[n] for n in names if c.get(n)), "")
+        if key in ("products", "formats", "hooks"):
+            v = [v] if isinstance(v, str) and v else [_s(x) for x in v] if isinstance(v, list) else []
+            out[key] = [x for x in v if x]
+        else:
+            out[key] = _s(v).strip()
+    out["name"] = re.sub(r"^(reel|carousel|static|animation|рилс|карусель)\s*:\s*", "",
+                         out["name"], flags=re.I)
+    return out if (out["name"] or out["idea"]) else None
+
+
+def normalise_strategy(st: dict) -> dict:
+    """Списки — списками (строку не разбивать по буквам), концепты — в нашей схеме."""
+    if not isinstance(st, dict):
+        return {}
+    for k in _LIST_KEYS:
+        v = st.get(k)
+        if v is None or v == "":
+            st[k] = []
+        elif isinstance(v, (str, dict)):
+            st[k] = [v]
+    for k in ("team_ideas", "wishes", "keep", "drop", "new_bets", "data_gaps", "weekly_themes", "bank_ids"):
+        st[k] = [_s(x).strip() for x in st[k] if _s(x).strip()]
+    st["concepts"] = [c for c in (_norm_concept(x) for x in st["concepts"]) if c]
+    for r in st["review"]:
+        if isinstance(r, dict) and isinstance(r.get("concept"), str):
+            r["concept"] = re.sub(r"^(reel|carousel|static|animation|рилс|карусель)\s*:\s*", "",
+                                  r["concept"], flags=re.I)
+    if not isinstance(st.get("big_idea"), str):
+        st["big_idea"] = _s(st.get("big_idea"))
+    return st
 
 
 def _concepts_block(strategy: dict) -> str:
@@ -610,6 +671,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     """
     from models.plan_analytics import as_prompt_block, _FORMAT_LABELS
 
+    _year = next((int(s["iso"][:4]) for s in week_slots if str(s.get("iso", ""))[:4].isdigit()), None)
     fixed = [s for s in week_slots if s.get("fixed")]
     week_slots = [s for s in week_slots if not s.get("fixed")]
     if not week_slots:
@@ -670,7 +732,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 
 Рынок: {market}.
 
-{_post_rules()}
+{_post_rules(_year)}
 
 Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
 {{"posts": [
@@ -708,6 +770,7 @@ def develop_ideas(ideas: list[dict], strategy: dict, year: int, *, brand: str = 
     формат, товар, надписи / сцены и подпись. Пишем пачками по 6, чтобы ответ не обрезался.
     """
     from models.plan_analytics import _FORMAT_LABELS
+    _year = year
     out: list[dict] = []
     for k in range(0, len(ideas), 6):
         chunk = ideas[k:k + 6]
@@ -737,7 +800,7 @@ def develop_ideas(ideas: list[dict], strategy: dict, year: int, *, brand: str = 
 - Товар выбери из каталога, если идея про товар или товар естественно в неё ложится.
   Идея про бренд в целом — `product` «вся линейка».
 
-{_post_rules()}
+{_post_rules(_year)}
 
 Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
 {{"posts": [

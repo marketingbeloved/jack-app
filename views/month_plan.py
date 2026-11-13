@@ -352,7 +352,8 @@ def _preview(brand: str, owners: dict) -> None:
     posts = st.session_state.get("gen_month_posts") or []
     if not posts:
         return
-    strategy = st.session_state.get("gen_month_strategy") or {}
+    from models import plan_generator
+    strategy = plan_generator.normalise_strategy(st.session_state.get("gen_month_strategy") or {})
     label = st.session_state.get("gen_month_label", "")
     failed = st.session_state.get("gen_month_failed") or []
 
@@ -384,11 +385,9 @@ def _preview(brand: str, owners: dict) -> None:
             score = (f" · оценка {round(sum(v for v in sc.values() if isinstance(v, (int, float))) / max(len(sc), 1), 1)}/5"
                      if sc else "")
             with st.expander(f"{c.get('name', '')}{score}", expanded=False):
-                st.markdown(f"**Для кого:** {c.get('segment', '')}  \n"
-                            f"**Инсайт:** {c.get('insight', '')}  \n"
-                            f"**Идея:** {c.get('idea', '')}  \n"
-                            f"**Почему мы:** {c.get('why_us', '')}  \n"
-                            f"**Новизна:** {c.get('new_vs_history', '')}")
+                rows = [(lbl, c.get(k)) for lbl, k in (("Для кого", "segment"), ("Инсайт", "insight"),
+                        ("Идея", "idea"), ("Почему мы", "why_us"), ("Новизна", "new_vs_history"))]
+                st.markdown("  \n".join(f"**{lbl}:** {val}" for lbl, val in rows if val))
                 hooks = c.get("hooks") or []
                 if hooks:
                     st.markdown("**Хуки:** " + " · ".join(f"“{h}”" for h in hooks if isinstance(h, str)))
@@ -424,16 +423,10 @@ def _preview(brand: str, owners: dict) -> None:
         head = (f'{p["date"]} · {tags}{_FMT_RU.get(p["format"], p["format"])} · {owner_name} — '
                 f'{p["title"]}')
         with st.expander(head, expanded=False):
-            if p.get("hook"):
-                st.markdown(f'**Хук:** {p["hook"]}')
             if p.get("product"):
-                link = f' · [Amazon]({p["product_url"]})' if p.get("product_url") else ""
-                st.caption(f'Товар: {p["product"]}{link} · пиллар: {p.get("pillar") or "—"} · '
+                st.caption(f'пиллар: {p.get("pillar") or "—"} · '
                            f'категория: {TYPE_COLORS.get(p["type"], {}).get("label") or p["type"]}')
-            if p.get("script"):
-                st.markdown(p["script"])
-            if p.get("caption"):
-                st.markdown(f'**Подпись (EN):**\n\n{p["caption"]}')
+            st.markdown(plan_generator._brief_text(p))   # ровно то, что ляжет в ячейку
             if p.get("concept"):
                 st.caption(f'💡 Концепт: {p["concept"]}')
             if p.get("similar_to"):
