@@ -889,7 +889,23 @@ def check_brief(text: str, brand: str = "BelovedPets") -> list[str]:
     bad = scan_claims(text)
     if bad:
         problems.append("запрещённые заявления: " + ", ".join(f"«{b}»" for b in bad))
+    problems += _count_problems(text)
     return problems
+
+
+def _numbered(text: str, header: str) -> int:
+    """Сколько пунктов «1. …» в блоке **header:** до следующего **блока:**."""
+    m = re.search(r"\*\*" + header + r"[^*]*:\*\*(.*?)(?=\n\s*\*\*[^*\n]+:\*\*|\Z)", text or "", re.S)
+    return len(re.findall(r"^\s*\d+[.:)]\s", m.group(1), re.M)) if m else 0
+
+
+def _count_problems(text: str) -> list[str]:
+    out = []
+    if _numbered(text, "Надписи") > MAX_SLIDES:
+        out.append(f"в карусели больше {MAX_SLIDES} слайдов — сократи до {MAX_SLIDES}")
+    if _numbered(text, "Сцены") > MAX_SCENES:
+        out.append(f"больше {MAX_SCENES} сцен — сократи до {MAX_SCENES}")
+    return out
 
 
 def _retry_with_problems(user: str, system: str, out: str, problems: list[str],
@@ -1080,6 +1096,57 @@ def script_from_reference(url: str = "", video_bytes: bytes | None = None,
 
 # ─── Vika brief: write a graphic-design ТЗ for one content-plan cell ────────
 
+# ─── Формат ТЗ исполнителям (решение Марии 2026-11-13) ──────────────────────
+# Вика: тип (статика / карусель до 4 слайдов), товар, надписи, подпись.
+# Дина: тип (рилс / анимация фото), товар, обложка, до 3 сцен, которые легко
+# сгенерировать ИИ, подпись. Шрифты, цвета, плашки, айдентику, пропорции и правила
+# монтажа исполнители знают — в ТЗ их нет. Материалы (фото, исходники) даёт Маша.
+MAX_SLIDES = 4
+MAX_SCENES = 3
+
+GRAPHIC_BRIEF_FORMAT = textwrap.dedent("""\
+    ТЗ Вике ЛАКОНИЧНОЕ — ровно эти блоки, больше ничего.
+    Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде.
+
+    Для статики (в т.ч. фото от блогера и промо):
+    **Тип креатива:** статика (или «статика · фото от блогера»)
+    **Товар:** название из базы целиком
+    **Надпись на креативе:** "English"
+    **Подпись к посту:** 2-4 строки на английском + CTA
+
+    Для карусели — МАКСИМУМ 4 слайда:
+    **Тип креатива:** карусель, N слайдов
+    **Товар:** название из базы целиком
+    **Надписи:**
+    1. "English"
+    2. "English"
+    **Подпись к посту:** 2-4 строки на английском + CTA
+
+    НЕ пиши: шрифты и шрифтовые пары, цвета и HEX, плашки и их расположение, композицию,
+    размеры, описание кадра, айдентику. Вика всё это знает и решает сама.""")
+
+VIDEO_BRIEF_FORMAT = textwrap.dedent("""\
+    ТЗ Дине ЛАКОНИЧНОЕ — ровно эти блоки, больше ничего.
+    Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
+
+    **Тип креатива:** рилс (или «анимация фото»)
+    **Товар:** название из базы целиком
+    **Обложка:** для рилса — что на обложке (по-русски, 1 фраза). Надпись: "English"
+                 для анимации фото — какое фото (его даст Маша), что на нём не выдумывай. Надпись: "English"
+    **Сцены:**
+    1. что в кадре (по-русски, 1 фраза). Надпись: "English"
+    2. ...
+    3. ...
+    **Подпись к посту:** 2-4 строки на английском + CTA
+
+    СЦЕНЫ — МАКСИМУМ 3. Каждую легко сгенерировать ИИ: одно животное, одна локация,
+    одно простое действие (спит, поворачивает голову, лижет, виляет хвостом, бежит к миске).
+    Нельзя: несколько животных во взаимодействии, мелкий текст и этикетки крупно, руки,
+    которые что-то сложное делают, быстрая смена локаций, сложные движения камеры.
+    Для анимации фото сцены — это то, как оживает фото и какие надписи появляются.
+    НЕ пиши: тайминги, айдентику, шрифты, пропорции, советы по монтажу, свету и звуку.""")
+
+
 def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
                    market: str = "", extra: str = "", link: str = "",
                    for_name: str = "Вика", for_role: str = "graphics") -> str:
@@ -1089,7 +1156,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     - graphics (Вика) → static post / carousel layout brief (slides + typeset copy).
     - video    (Дина) → short video brief (numbered scenes + timing + voiceover).
 
-    link: optional Drive/photo link Darya gives (e.g. blogger photo for «фото от блогера»).
+    link: optional Drive/photo link Masha gives (e.g. blogger photo for «фото от блогера»).
     When present, Jack must reference it in the ТЗ as the source asset.
     """
     link = (link or "").strip()
@@ -1101,8 +1168,8 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         "графдизайнер (делает статичные посты / карусели в Figma для Instagram)"
     )
     link_line = (
-        f"- Ссылка от Марии для {who} (ИСХОДНИК — фото блогера / референс): {link}"
-        if link else "- Ссылка от Марии: (нет)"
+        f"- Ссылка от Маши для {who} (ИСХОДНИК — фото блогера / референс): {link}"
+        if link else "- Ссылка от Маши: (нет)"
     )
     link_rule = (
         f"В ТЗ ОБЯЗАТЕЛЬНО укажи эту ссылку отдельной строкой как исходник, который {who} "
@@ -1111,36 +1178,9 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         if link else ""
     )
     if is_video:
-        format_block = textwrap.dedent("""\
-            Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
-
-            **Формат:** Reel, до 15 сек (или Анимация фото)
-            **Товар:** название из базы целиком (с вкусом и размером) · ASIN · ссылка
-            **Идея:** 1 фраза по-русски
-            **Хук (0-2 сек):** "English"
-            **Сцены:**
-            - 0-4 сек — что в кадре (РУС, коротко) · на экране "English" · озвучка "English"
-            - (ещё 1-3 строки, тайминги подряд, финал не позже 15 сек)
-            **Подпись под пост (EN):** 2-4 строки
-
-            Больше НИЧЕГО. Айдентика, шрифты, цвета, пропорции кадра, стиль субтитров и
-            логотип Дине уже известны — про них не пиши. Без советов по свету, съёмке,
-            монтажу и звуку, без вступлений и примечаний. Озвучку в сцене можно пропустить.
-            Порядок блоков в строке сцены менять нельзя — его разбирает код при отправке в Notion.""")
+        format_block = VIDEO_BRIEF_FORMAT
     else:
-        format_block = textwrap.dedent("""\
-            ТЗ дизайнеру МИНИМАЛЬНОЕ — ровно 4 блока, больше ничего.
-            Выдай ЧИСТЫЙ MARKDOWN (без вступлений, без ``` ), строго в таком виде:
-
-            **Вид креатива:** фото от блогера / статичный пост / карусель N экранов / промо
-            **Товар:** название из базы целиком (с вкусом и размером) · ASIN · ссылка
-            **Надпись на креативе:** текст на английском. Для карусели — по строке на экран:
-              1: "..."
-              2: "..."
-            **Подпись для поста (EN):** 2-4 строки + CTA
-
-            НЕ пиши: концепт, композицию, холст и размеры, поля, цвета и HEX, плашки, шрифты,
-            packshot, описание кадра. Айдентику и пропорции Вика знает.""")
+        format_block = GRAPHIC_BRIEF_FORMAT
     try:
         from models.jack_lessons import render_rules_for_prompt as _rules
         system = _system_prompt() + _rules(brand)
@@ -1170,7 +1210,7 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         - Тема поста (из плана): "{title}"
         - Пиллар: {pillar or '(определи сам по теме)'}
         {link_line}
-        - Доп. пожелания Марии: {extra or '(нет)'}
+        - Доп. пожелания Маши: {extra or '(нет)'}
 
         {link_rule}
 
@@ -1193,7 +1233,17 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
     problems = check_brief(out, brand)
     if problems:
         out = _retry_with_problems(user, system, out, problems, brand)
-    return _with_link(out, brand, market)
+    return _short_product(_with_link(out, brand, market), brand, market)
+
+
+def _short_product(text: str, brand: str, market: str | None = None) -> str:
+    """В ТЗ исполнителю — короткое название товара + ссылка (решение Марии 2026-11-13)."""
+    try:
+        from models.products import shorten_product_line
+        mk = (market or "").upper()
+        return shorten_product_line(text, brand, mk if mk in ("US", "UK", "CA") else None)
+    except Exception:
+        return text
 
 
 def _with_link(text: str, brand: str, market: str | None = None) -> str:
@@ -1350,7 +1400,7 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
     except Exception as e:  # noqa: BLE001
         return {"error": f"Notion module not importable: {e}"}
 
-    # Ссылки НЕ обязательны — Дина берёт материалы с общего Диска сама.
+    # Ссылки НЕ обязательны — материалы даёт Маша.
     drive_url = (drive_url or "").strip()
     listing_url = (listing_url or "").strip()
 
@@ -1390,7 +1440,7 @@ def publish_to_notion(concept: dict, drive_url: str, listing_url: str, end_date:
 
 def autopush_to_notion(concept: dict, end_date: str | None = None) -> dict:
     """Оформить ТЗ Дине в Notion автоматически. Ссылки НЕ обязательны — если они
-    есть у концепта, прикрепим; нет — Дина берёт материалы с Диска сама.
+    есть у концепта, прикрепим; нет — материалы даёт Маша.
     Сохраняет notion_url на концепте при успехе, чтобы не запушить дважды.
 
     Возвращает:

@@ -203,6 +203,7 @@ POST_FORMATS = {
     "reel": "🎬 рилс",
     "carousel": "🖼 карусель",
     "animation": "✨ анимация",
+    "static": "🖼 статика",
     "lifestyle": "📷 life pic (статичное фото)",
     "blogger_photo": "🐶 фото от блогера",
     "promo": "🏷 промо / акция",

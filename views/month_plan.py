@@ -16,7 +16,7 @@ from views.content_plan import (TYPE_COLORS, _shift_month, _team_owners,
 from views.content_plan import month_label as month_label_for
 
 _FMT_RU = {"reel": "🎬 рилс", "carousel": "🖼 карусель", "animation": "✨ анимация",
-           "lifestyle": "📷 life pic", "blogger_photo": "🐶 фото блогера", "promo": "🏷 промо"}
+           "lifestyle": "📷 life pic", "static": "🖼 статика", "blogger_photo": "🐶 фото блогера", "promo": "🏷 промо"}
 
 
 def render() -> None:

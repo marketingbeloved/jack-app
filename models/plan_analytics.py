@@ -23,6 +23,7 @@ _FORMAT_RULES: list[tuple[str, str]] = [
     ("carousel",      r"carousel|карусел"),
     ("reel",          r"\breel|рилс|\bvideo\b|видео|podcast|pov\b"),
     ("lifestyle",     r"life\s*pic|lifestyle|life\s*photo"),
+    ("static",        r"статик|static"),
     ("promo",         r"%|off\b|deal|discount|sale|prime\s*day|subscribe\s*&\s*save|offer"),
 ]
 
@@ -32,6 +33,7 @@ _FORMAT_LABELS = {
     "carousel":      "карусель",
     "reel":          "рилс / видео",
     "lifestyle":     "life pic (статичное фото)",
+    "static":        "статика (графика)",
     "promo":         "промо / скидка",
     "graphic":       "графика / пост от дизайнера",
     # Не «прочее»: это темы, которые команда придумала сама, просто без слова-формата в
@@ -46,6 +48,7 @@ _BRIEF_FORMAT_LINE = [
     ("animation",     r"анимац|оживл"),
     ("carousel",      r"карусел|carousel"),
     ("lifestyle",     r"life\s*pic|статичн"),
+    ("static",        r"статик"),
     ("promo",         r"промо|promo"),
     ("reel",          r"reel|рилс|видео|video"),
 ]
@@ -71,7 +74,7 @@ def detect_format(title: str, brief: str = "", owner: str = "") -> str:
         if re.search(pattern, low):
             return name
     text = (brief or "").lower()
-    m = re.search(r"\*\*формат:\*\*\s*(.+)", text)
+    m = re.search(r"\*\*(?:формат|тип креатива):\*\*\s*(.+)", text)
     if m:
         for name, pattern in _BRIEF_FORMAT_LINE:
             if re.search(pattern, m.group(1)):

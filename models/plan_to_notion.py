@@ -31,7 +31,7 @@ def _field(text: str, *labels: str) -> str:
 
 def _caption(text: str) -> str:
     """Подпись под пост — блок после «**Подпись под пост (EN):**» до следующего заголовка."""
-    m = re.search(r"\*\*Подпись под пост[^*]*\*\*[:\s]*\n?(.+?)(?=\n\*\*|\Z)", text,
+    m = re.search(r"\*\*Подпись (?:под|к|для) пост[^*]*\*\*[:\s]*\n?(.+?)(?=\n\*\*|\Z)", text,
                   re.IGNORECASE | re.DOTALL)
     return m.group(1).strip() if m else ""
 
@@ -45,7 +45,9 @@ def _scenes(text: str) -> list[str]:
 
 # «0-3 сек — что в кадре · на экране "English"» — ровно так Джек пишет сцены сейчас.
 _TIME_RE = re.compile(r"^\s*(\d+\s*[-–—]\s*\d+\s*(?:сек|s|sec)\b\.?)\s*[—–\-:]?\s*(.*)$", re.I)
-_TOS_RE = re.compile(r"(?:·\s*)?(?:на экране|overlay|on-?screen|текст на экране)\s*:?\s*(.+)$", re.I)
+_TOS_RE = re.compile(r"(?:[·.]\s*)?(?:на экране|надпись|overlay|on-?screen|текст на экране)\s*:?\s*(.+)$", re.I)
+# «1. что в кадре. Надпись: "English"» — формат сцен Дины с 2026-11-13 (без таймингов).
+_NUM_RE = re.compile(r"^\s*(\d+)[.)]\s+(.*)$")
 _VO_RE = re.compile(r"(?:·\s*)?(?:voiceover|озвучка|голос за кадром)\s*:?\s*(.+)$", re.I)
 
 
@@ -57,12 +59,19 @@ def scene_rows(text: str) -> list[dict]:
     Разметка в ТЗ уже есть, её достаточно разобрать регуляркой.
     """
     rows: list[dict] = []
-    for line in text.split("\n"):
-        line = line.strip().lstrip("-*• ").strip()
+    in_scenes = False
+    for raw in text.split("\n"):
+        if re.match(r"^\s*\*\*[^*\n]+:\*\*", raw):
+            in_scenes = bool(re.match(r"^\s*\*\*Сцены", raw))
+        line = raw.strip().lstrip("-*• ").strip()
         m = _TIME_RE.match(re.sub(r"\*\*", "", line))
-        if not m:
-            continue
-        time_s, rest = m.group(1).strip(), m.group(2).strip()
+        if m:
+            time_s, rest = m.group(1).strip(), m.group(2).strip()
+        else:
+            mn = _NUM_RE.match(raw)
+            if not mn or not in_scenes:
+                continue
+            time_s, rest = f"Сцена {mn.group(1)}", mn.group(2).strip()
 
         vo = ""
         mv = _VO_RE.search(rest)
@@ -85,7 +94,8 @@ def _is_static(post: dict, text: str) -> bool:
     fmt = (post.get("format") or "").lower()
     title = (post.get("title") or "").lower()
     blob = f"{fmt} {title} {text[:200]}".lower()
-    if "carousel" in blob or "карусел" in blob:
+    if ("carousel" in blob or "карусел" in blob or "статик" in blob
+            or fmt in ("static", "promo", "blogger_photo")):
         return True
     if "слайд" in text.lower() and not _SCENE_RE.search(text):
         return True
@@ -118,8 +128,8 @@ def build_concept(post: dict, brief_text: str, brand: str = "BelovedPets",
         # Рынок из интерфейса, если выбран; иначе — только если он прямо назван в ТЗ.
         "market": market or _market_from_text(text),
         "brand": brand,
-        "hook": _field(text, "Хук", "Overlay сверху", "Hook"),
-        "angle": _field(text, "Концепт", "Формат"),
+        "hook": _field(text, "Хук", "Обложка", "Overlay сверху", "Hook"),
+        "angle": _field(text, "Концепт", "Формат", "Тип креатива"),
         "cta": _caption(text),
         "format": "carousel" if _is_static(post, text) else "reel",
         "scenes": _scenes(text),

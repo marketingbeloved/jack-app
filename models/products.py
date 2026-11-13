@@ -394,6 +394,15 @@ def validate_products(text: str, brand: str = "BelovedPets", market: str | None 
     if not m:
         return ["в ТЗ нет строки «**Товар:**» с названием из базы"]
     named = m.group(1).strip().strip("*").split("·")[0].strip()
+    # Короткое название + ссылка (формат ТЗ с 2026-11-13): товар узнаём по ASIN в ссылке.
+    ma = re.search(r"/dp/([A-Z0-9]{10})", m.group(1))
+    if ma:
+        hit = by_asin(ma.group(1))
+        if hit and _brand_key(hit["brand"]) == _brand_key(brand):
+            return problems
+        if hit:
+            return [f"«{hit['title'][:70]}» — товар другого бренда; бренды не смешиваем, "
+                    f"бери только из базы {brand}"]
     if named.lower().startswith(("вся линейка", "бренд", "нет", "—", "уточнить")):
         return problems                      # бренд-ТЗ без конкретного SKU — это законно
     if find_exact(named, brand, market):
@@ -405,3 +414,60 @@ def validate_products(text: str, brand: str = "BelovedPets", market: str | None 
     if c:
         return ["название неполное — в базе: " + " / ".join(f"«{p['title']}»" for p in c[:3])]
     return [f"товара «{named[:70]}» нет в базе — название выдумано или искажено"]
+
+
+# ─── Короткое название в ТЗ (решение Марии 2026-11-13) ────────────────────────
+# Исполнителям — «название кратко + ссылка». Полное название остаётся в базе и в плане,
+# в ТЗ строку «Товар:» код переписывает сам, чтобы модель не сокращала по-своему.
+
+def by_asin(asin: str) -> dict | None:
+    asin = (asin or "").strip().upper()
+    return next((p for p in _base() if p.get("asin", "").upper() == asin), None)
+
+
+_SIZE_RE = re.compile(r"\d[\d.,]*\s*(g|kg|ml|oz|lb|tubes?|pack|doses?|refills?|diffusers?)\b"
+                      r"|\d+\s*×", re.I)
+
+
+_FOR_RE = re.compile(r"\s+for\s+((?:Dogs?|Cats?|Ferrets)(?:(?:\s*,\s*|\s*&\s*|\s+and\s+)"
+                     r"(?:Dogs?|Cats?|Ferrets))*)(\s*\((?!\d)[^)]*\))?", re.I)
+
+
+def _short(title: str, keep_animal: bool) -> str:
+    t = re.sub(r"^(Beloved Pets|TOBYDIC)\s+", "", (title or "").strip(), flags=re.I)
+    t = re.sub(r"\s+—\s+(Dog|Cat) Treats\b", "", t)
+    t = re.sub(r"\s+—\s+", ", ", t)
+    t = re.sub(r"\s*\((\d[^)]*)\)", "", t)                 # «300 g (10.6 oz)» → «300 g»
+    t = _FOR_RE.sub(lambda m: f" for {m.group(1)}" if keep_animal else "", t)
+    return re.sub(r"\s{2,}", " ", t).strip(" ,")
+
+
+def short_name(title: str) -> str:
+    """«Beloved Pets Sweet Potato Wrapped with Chicken — Dog Treats, 300 g (10.6 oz)»
+    → «Sweet Potato Wrapped with Chicken, 300 g». Бренд и «for Dogs & Cats» убираем,
+    вкус и размер оставляем. «for Cats / for Dogs» остаётся, только если без него
+    один и тот же товар бренда есть для разных животных (ошейник для кошек и для собак)."""
+    short = _short(title, False)
+    brand = "TOBYDIC" if (title or "").upper().startswith("TOBYDIC") else "BelovedPets"
+    stem = short.split(",")[0]
+    animals = {(_FOR_RE.search(p["title"]) or [None, ""])[1] for p in _base()
+               if _brand_key(p["brand"]) == _brand_key(brand)
+               and _short(p["title"], False).split(",")[0] == stem}
+    return _short(title, True) if len(animals) > 1 else short
+
+
+def shorten_product_line(text: str, brand: str = "BelovedPets", market: str | None = None) -> str:
+    """Строку «**Товар:** <полное> · ASIN · ссылка» → «**Товар:** <кратко> · ссылка»."""
+    def fix(m: "re.Match") -> str:
+        body = m.group(2)
+        ma = re.search(r"/dp/([A-Z0-9]{10})", body)
+        p = by_asin(ma.group(1)) if ma else None
+        if not p:
+            named = body.strip().strip("*").split("·")[0].strip()
+            p = find_exact(named, brand, market or "all")
+        if not p:
+            return m.group(0)
+        url = re.search(r"https?://\S+", body)
+        link = url.group(0) if url else p.get("url", "")
+        return f"{m.group(1)} {short_name(p['title'])}" + (f" · {link}" if link else "")
+    return re.sub(r"^(\s*\*\*Товар(?: в кадре)?:\*\*)\s*(.+)$", fix, text or "", flags=re.M)

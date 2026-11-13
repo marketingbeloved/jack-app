@@ -39,12 +39,12 @@ def posting_days(brand: str) -> tuple[int, ...]:
 def posting_days_ru(brand: str) -> str:
     return ", ".join(WEEKDAY_RU[d] for d in posting_days(brand))
 
-# The structure Darya fixed: one blogger photo a week (Vika), the rest split between
-# carousels, animations and reels of varying formats (Dina).
-FORMAT_MIX = ["carousel", "animation", "reel", "lifestyle"]
+# Одно фото от блогера в неделю (Вика), остальное — статика и карусели (Вика),
+# рилсы и анимации фото (Дина). Решение Марии 2026-11-13: life pic в новых планах нет.
+FORMAT_MIX = ["carousel", "static", "animation", "reel"]
 
 _ALLOWED_TYPES = {"engaging", "selling", "viral", "neutral"}
-_ALLOWED_FORMATS = {"blogger_photo", "carousel", "animation", "reel", "lifestyle", "promo"}
+_ALLOWED_FORMATS = {"blogger_photo", "carousel", "static", "animation", "reel", "lifestyle", "promo"}
 
 
 def _active_executors() -> set[str]:
@@ -88,6 +88,7 @@ def owners_from_history(analysis: dict) -> tuple[str, str]:
 # выведенного из истории.
 _FORMAT_ROLE = {
     "carousel":  "graphics",
+    "static":    "graphics",
     "reel":      "video",
     "animation": "video",
     "lifestyle": "video",
@@ -258,8 +259,8 @@ def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedP
 Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
 (идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
 должна быть ровно {slots}.
-Исполнители — только Вика (графика: фото от блогера, carousel, promo) и Дина (видео: reel,
-animation, lifestyle), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
+Исполнители — только Вика (графика: фото от блогера, static, carousel) и Дина (видео: reel,
+animation), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
 вместе с еженедельным «фото от блогера» графики и видео в месяце было примерно поровну.
 
 {team_ideas_block(ideas)}
@@ -286,7 +287,7 @@ animation, lifestyle), нагрузка 50/50 (решение Марии). По�
   "keep": ["до 3 пунктов: что из прошлых месяцев работает и повторяем — с обоснованием из данных"],
   "drop": ["только провалы по цифрам; нет цифр — пустой список"],
   "new_bets": ["4-6 новых форматов/идей/тем, которых у нас ещё не было — на них минимум половина постов"],
-  "format_mix": {{"reel": 4, "carousel": 3, "animation": 1, "lifestyle": 1}},
+  "format_mix": {{"reel": 3, "carousel": 2, "static": 2, "animation": 2}},
   "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
   "data_gaps": ["чего не хватает, чтобы планировать точнее"]
 }}
@@ -334,7 +335,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
         else:
             slot_lines.append(
                 f'- {s["date"]} ({s["weekday"]}) — свободный слот, исполнитель {who(s["owner"])}. '
-                f'Выбери формат: carousel / animation / reel / lifestyle.')
+                f'Выбери формат: carousel / static / animation / reel.')
     fixed_lines = [f'- {s["date"]} ({s["weekday"]}) — ЗАНЯТО идеей команды: «{i["title"]}» '
                    f'[{_FORMAT_LABELS.get(i["format"], i["format"])}]. Не пиши для этого дня.'
                    for s in fixed for i in s["fixed"]]
@@ -367,22 +368,29 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 
 Правила:
 - Формат «фото от блогера» — только в зафиксированном слоте. Остальные слоты РАЗНЫЕ:
-  не ставь три рилса подряд, чередуй carousel / animation / reel / lifestyle.
+  не ставь три рилса подряд, чередуй carousel / static / animation / reel.
 - ВАЖНО ПРО «фото от блогера». Ты выбираешь, КАКОЙ ТОВАР показать, а фото с этим товаром
-  Мария подберёт на Диске сама. Что на фото (животное, поза, обстановка) — не придумывай.
+  Маша подберёт на Диске сама. Что на фото (животное, поза, обстановка) — не придумывай.
   `title` = «фото от блогера · <товар коротко, 2-4 слова>», напр.
   «фото от блогера · Hip & Joint Chews».
 - `hook` — на АНГЛИЙСКОМ: первые 2 секунды видео или надпись на первом экране графики.
-- `script` — ТЗ исполнителю. Айдентика, шрифты, цвета, пропорции, кадрирование и
-  логотип исполнителям УЖЕ ИЗВЕСТНЫ — про них НЕ пиши ни слова. Никаких советов по съёмке
-  и обработке. Только то, что меняется от поста к посту:
-  • ГРАФИКА (Вика: фото от блогера, carousel, promo) — ТОЛЬКО надпись на креативе, на
-    английском. Одна строка для одиночного креатива; для карусели — по строке на экран:
-    «1: "..."», «2: "..."». Больше ничего: ни описания кадра, ни композиции.
-  • ВИДЕО (Дина: reel, animation, lifestyle) — первой строкой «Идея: <1 фраза по-русски>»,
-    дальше только сцены, каждая одной строкой строго в виде
-    «- 0-3 сек — что в кадре (РУС, коротко) · на экране "English" · озвучка "English"»
-    (озвучку можно пропустить, если её нет). 2-4 сцены. Без вступлений и примечаний.
+- ТЗ исполнителям ЛАКОНИЧНЫЕ. Шрифты, цвета, плашки, айдентику, пропорции, монтаж Вика и
+  Дина знают — про них НИ слова. Никаких советов по съёмке и обработке.
+- `hook` — на АНГЛИЙСКОМ: надпись на обложке видео или на первом слайде графики.
+- `script`:
+  • ГРАФИКА (Вика: фото от блогера, static, carousel) — ТОЛЬКО надписи на английском.
+    Статика — одна строка «"..."». Карусель — МАКСИМУМ 4 слайда, по строке на слайд:
+    «1. "..."», «2. "..."». Больше ничего.
+  • ВИДЕО (Дина: reel, animation) — МАКСИМУМ 3 сцены, каждая одной строкой строго так:
+    «1. что в кадре (по-русски, 1 фраза). Надпись: "English"». Сцены такие, чтобы их
+    легко было сгенерировать ИИ: одно животное, одна локация, одно простое действие
+    (спит, поворачивает голову, лижет, виляет хвостом, бежит к миске). Нельзя: несколько
+    животных во взаимодействии, этикетки и мелкий текст крупно, сложные действия рук,
+    смена локаций, сложные движения камеры. Без таймингов.
+- `cover` — только для видео, обложка одной строкой.
+  Reel: «что на обложке (по-русски, 1 фраза). Надпись: "English"».
+  Animation: «фото — даст Маша. Надпись: "English"» (что на фото — не выдумывай).
+  Для графики `cover` — пустая строка.
 - `caption` — подпись под пост на английском, 2-4 строки + CTA. Хэштеги — В КОНЦЕ подписи,
   НЕ БОЛЬШЕ {MAX_HASHTAGS} штук на пост (лишние отрежутся автоматически).
 - `why` — одной фразой, на чём основано решение: факт из истории/цифр ИЛИ какую новую
@@ -391,27 +399,24 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
   которых у нас ещё не было. Не пересобирай прошлые посты другими словами.
 - НЕ МУДРИТЬ, но делать КРУТО. Простая съёмка не значит скучная идея: вся выдумка уходит
   в хук и в саму мысль, а не в сложность продакшена.
-- ПОДПИСЫВАТЬ ВСЁ. В каждой сцене — текст на экране (субтитры/overlay), ролик должен
-  читаться без звука. Ни одной сцены без подписи.
+- ПОДПИСЫВАТЬ ВСЁ. В каждой сцене — надпись на экране, ролик должен читаться без звука.
 - ТОВАР называй точно и целиком, и бенефиты бери из каталога ниже, а не из головы.
 - БАЛАНС. В месяце должен быть РАЗНЫЙ контент: ориентир ~50% вовлекающих (engaging),
   ~25% ПРОДАЮЩИХ (selling) и ~25% вирусных (viral). Месяц из одних вовлекающих — ошибка.
   Продающие — офферы, скидки, бандлы, Subscribe & Save, Amazon / Chewy / Faire, запуски.
   Смотри, какие категории уже заняты в предыдущих неделях, и добирай недостающие.
 - ДЛИНА РИЛСА — строго ДО 20 СЕКУНД. Тайминг сцен должен укладываться в 20 сек, не больше.
-- СНИМАЕМОСТЬ. Рилс снимается на телефон дома за 20-30 минут. Максимум 3-4 сцены.
-  Без сплит-скринов, без раскадровок на 5+ пунктов, без зумов на этикетку, без реквизита
-  вроде календарей и досок, без нескольких локаций и сложного монтажа. Одна сцена — одна
-  простая мысль. Идея требует продакшена — упрости идею, а не проси сложную съёмку.
+- ПРОСТОТА. Рилс Дина генерирует ИИ. Максимум 3 сцены. Без сплит-скринов, без зумов на
+  этикетку, без реквизита вроде календарей и досок, без нескольких локаций и сложного
+  монтажа. Одна сцена — одна простая мысль. Идея требует продакшена — упрости идею.
 - РАЗНООБРАЗИЕ. Один и тот же шаблон или рубрика — не чаще 2 раз за месяц. Чередуй заходы:
   POV, до/после, один кадр с закадровым голосом, разговор с питомцем, распаковка,
   ошибка-и-исправление, реакция на отзыв, крупный план проблемы. Смотри список уже занятых
   тем выше и не повторяй структуру, а не только слова.
 - ANIMATION — это НЕ мультик и не motion-графика с нуля. Это: берём готовое ФОТО,
   Дина его оживляет (лёгкое движение в кадре), сверху накладывает текст и звук.
-  Фото берётся из одобренного UGC-контента JoinBrands (папка на общем Диске) — так и пиши:
-  «Исходник: одобренное фото из JoinBrands (ссылку даст Мария)». Что именно на фото —
-  НЕ придумывай, как и в слоте «фото от блогера».
+  Фото даёт Маша (одобренный UGC с Диска) — поэтому в `cover` пиши «фото — даст Маша».
+  Что именно на фото — НЕ придумывай, как и в слоте «фото от блогера».
 - `product` бери ТОЧНО из каталога брендa, полным названием SKU. Не сокращай, не выдумывай
   и не смешивай два товара в один. Если для идеи не нашёл подходящего SKU — поменяй идею.
   Пост про бренд в целом, без конкретного товара — пиши в `product` «вся линейка».
@@ -429,10 +434,10 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
 Верни ЧИСТЫЙ JSON без обёрток и без текста вокруг:
 {{"posts": [
   {{"date": "01.09", "title": "короткая тема строчными, как в плане",
-    "type": "engaging|selling|viral", "format": "reel|carousel|animation|lifestyle|blogger_photo",
+    "type": "engaging|selling|viral", "format": "reel|animation|carousel|static|blogger_photo",
     "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
     "product": "какой SKU в кадре", "hook": "English hook",
-    "script": "готовое ТЗ в markdown", "caption": "English caption",
+    "cover": "обложка (только видео)", "script": "надписи / сцены", "caption": "English caption",
     "why": "обоснование из данных"}}
 ]}}
 """
@@ -533,6 +538,7 @@ def _normalise(posts: list[dict], slots: list[dict],
             "product": product,
             "product_url": _product_link(product, brand, market),
             "hook": (post.get("hook") or "").strip(),
+            "cover": (post.get("cover") or "").strip(),
             "script": _clean_md(post.get("script") or ""),
             "caption": limit_hashtags((post.get("caption") or "").strip()),
             "why": (post.get("why") or "").strip(),
@@ -619,53 +625,76 @@ def commit_to_plan(posts: list[dict], brand: str = "BelovedPets",
 
 _FORMAT_RU = {"reel": "Reel / видео", "carousel": "Карусель", "animation": "Анимация (оживление фото)",
               "lifestyle": "Life pic (статичное фото)", "blogger_photo": "Фото от блогера",
-              "promo": "Промо"}
+              "promo": "Промо", "static": "Статика"}
 
 
-_GRAPHIC_FORMATS = {"blogger_photo", "carousel", "promo"}
+_GRAPHIC_FORMATS = {"blogger_photo", "carousel", "promo", "static"}
 
 
 def _product_line(p: dict) -> str:
+    """«**Товар:** <кратко> · ссылка». Полное название остаётся в плане (p["product"])."""
     link = p.get("product_url") or ""
-    return f'**Товар:** {p["product"]}' + (f" · {link}" if link else "")
+    name = p["product"]
+    try:
+        from models.products import find_exact, short_name, by_asin
+        m = re.search(r"/dp/([A-Z0-9]{10})", link)
+        hit = (by_asin(m.group(1)) if m else None) or find_exact(name, p.get("brand") or "BelovedPets")
+        if hit:
+            name = short_name(hit["title"])
+    except Exception:
+        pass
+    return f"**Товар:** {name}" + (f" · {link}" if link else "")
+
+
+_GRAPHIC_KIND = {"carousel": "карусель", "blogger_photo": "статика · фото от блогера",
+                 "promo": "статика · промо", "static": "статика"}
+_VIDEO_KIND = {"reel": "рилс", "animation": "анимация фото", "lifestyle": "рилс"}
+_NUM_LINE = re.compile(r"^\s*\d+[.:)]\s")
 
 
 def _brief_text(p: dict) -> str:
-    """Assemble the stored ТЗ exactly as the team reads it in a plan cell.
+    """Собрать ТЗ так, как его читает исполнитель в ячейке плана.
 
-    Решение Марии (2026-11-11): ТЗ Вике — только вид креатива, товар, надпись на креативе
-    и подпись. ТЗ Дине — короткая структура без айдентики и пропорций (они ей известны).
-    Обоснование «почему в плане» видно Марии в черновике, в ТЗ исполнителю его нет.
+    Решение Марии (2026-11-13), лаконично:
+      Вика — тип (статика / карусель до 4 слайдов), товар кратко + ссылка, надписи, подпись.
+      Дина — тип (рилс / анимация фото), товар кратко + ссылка, обложка, до 3 сцен, подпись.
+    Шрифты, цвета, плашки, айдентику и правила монтажа исполнители знают.
+    Уже залитые ТЗ (ноябрь, декабрь) не пересобираются: текст пишется только при заливке.
     """
     fmt = p.get("format", "")
-    kind = _FORMAT_RU.get(fmt, fmt)
     script = (p.get("script") or "").strip()
+    script = re.sub(r"^\s*\**\s*Идея\s*:?\**\s*:?.*(?:\n|$)", "", script).strip()
     caption = (p.get("caption") or "").strip()
 
     if fmt in _GRAPHIC_FORMATS:
-        text_on = script or (f'"{p["hook"]}"' if p.get("hook") else "")
-        parts = [f"**Вид креатива:** {kind}"]
+        slides = [l.strip() for l in script.splitlines() if _NUM_LINE.match(l)][:4]
+        kind = _GRAPHIC_KIND.get(fmt, "статика")
+        if fmt == "carousel" and slides:
+            kind = f"карусель, {len(slides)} " + ("слайда" if len(slides) > 1 else "слайд")
+        parts = [f"**Тип креатива:** {kind}"]
         if p.get("product"):
             parts.append(_product_line(p))
-        if text_on:
-            parts.append(f"**Надпись на креативе:**\n{text_on}")
+        if fmt == "carousel" and slides:
+            parts.append("**Надписи:**\n" + "\n".join(slides))
+        else:
+            text_on = script or (f'"{p["hook"]}"' if p.get("hook") else "")
+            if text_on:
+                parts.append(f"**Надпись на креативе:** {text_on}")
         if caption:
-            parts.append(f"**Подпись для поста (EN):**\n{caption}")
+            parts.append(f"**Подпись к посту:** {caption}")
         return "\n\n".join(parts).strip()
 
-    idea = ""
-    m = re.match(r"^\s*\**\s*Идея\s*:?\**\s*:?\s*(.+?)\s*(?:\n|$)", script)
-    if m:
-        idea, script = m.group(1).strip(" *"), script[m.end():].strip()
-    parts = [f"**Формат:** {kind}"]
+    parts = [f"**Тип креатива:** {_VIDEO_KIND.get(fmt, 'рилс')}"]
     if p.get("product"):
         parts.append(_product_line(p))
-    if idea:
-        parts.append(f"**Идея:** {idea}")
-    if p.get("hook"):
-        parts.append(f'**Хук (0-2 сек):** {p["hook"]}')
-    if script:
-        parts.append(f"**Сцены:**\n{script}")
+    cover = (p.get("cover") or "").strip()
+    if not cover and p.get("hook"):
+        cover = ("фото — даст Маша. " if fmt == "animation" else "") + f'Надпись: "{p["hook"]}"'
+    if cover:
+        parts.append(f"**Обложка:** {cover}")
+    scenes = [l.strip() for l in script.splitlines() if l.strip()][:3]
+    if scenes:
+        parts.append("**Сцены:**\n" + "\n".join(scenes))
     if caption:
-        parts.append(f"**Подпись под пост (EN):**\n{caption}")
+        parts.append(f"**Подпись к посту:** {caption}")
     return "\n\n".join(parts).strip()
