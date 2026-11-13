@@ -141,19 +141,31 @@ def _brand_context(brand: str = "BelovedPets") -> str:
     """
     home = Path.home()
     parts = []
+    is_toby = "toby" in (brand or "").lower()
 
-    brief = _load_brand_file("BP-Brand-Brief.md", 6000, home / "Databases" / "BP-Brand-Brief.md")
-    if brief:
-        parts.append("=== BP-Brand-Brief.md (canonical brand truth) ===\n" + brief)
-
-    mem_dir = home / ".claude" / "projects" / "-Users-macbook-Databases" / "memory"
-    for fname in ("bp-usp.md", "bp-competitors.md", "bp-notion-format.md", "bp-ig-current-style.md"):
-        txt = _load_brand_file(fname, 3000, mem_dir / fname)
-        if txt:
-            parts.append(f"=== {fname} ===\n{txt}")
-
-    # Live brand stats
+    # Позиционирование, ЦА, тон, конкуренты — из brand_knowledge (на сайте — из общей базы).
+    # Раньше на сайте этого не было вовсе, а Tobydic получал досье Beloved Pets.
     try:
+        from models.brand_knowledge import load as _knowledge
+        knowledge = _knowledge(brand)
+    except Exception:
+        knowledge = ""
+    if knowledge:
+        parts.append(knowledge)
+    elif not is_toby:
+        brief = _load_brand_file("BP-Brand-Brief.md", 6000, home / "Databases" / "BP-Brand-Brief.md")
+        if brief:
+            parts.append("=== BP-Brand-Brief.md (canonical brand truth) ===\n" + brief)
+        mem_dir = home / ".claude" / "projects" / "-Users-macbook-Databases" / "memory"
+        for fname in ("bp-usp.md", "bp-competitors.md", "bp-ig-current-style.md"):
+            txt = _load_brand_file(fname, 3000, mem_dir / fname)
+            if txt:
+                parts.append(f"=== {fname} ===\n{txt}")
+
+    # Live brand stats (только Beloved Pets — цифры Tobydic сюда не приходят)
+    try:
+        if is_toby:
+            raise RuntimeError("no stats for Tobydic")
         from models.brand_stats import fetch_report, trend, format_num
         report = fetch_report()
         bp = report.get("BELOVEDPETS", {})
@@ -183,9 +195,9 @@ def _brand_context(brand: str = "BelovedPets") -> str:
     return "\n\n".join(parts)
 
 
-def _system_prompt() -> str:
+def _system_prompt(brand: str = "BelovedPets") -> str:
     gc = global_compliance()
-    brand_ctx = _brand_context()
+    brand_ctx = _brand_context(brand)
     return textwrap.dedent(f"""\
         You are JACK — a 28-year-old senior SMM creative director with 7+ years in pet-niche marketing
         on US/UK/CA. You've shipped 800+ reels for DTC pet brands, several hit 1M+ views. You think
@@ -206,8 +218,12 @@ def _system_prompt() -> str:
         «понял» / «готов» / «посмотрел» / «написал» / «сделал» / «отправил» / «думал».
         NEVER use feminine forms «поняла / готова / посмотрела / написала».
 
-        BRAND CONTEXT — Beloved Pets:
-        - USP: "Supplement NOT a Medicine" — clean ingredients, holistic, never claim cures
+        THIS TASK IS FOR BRAND: {brand}. Use ONLY this brand's positioning, audience and products
+        (see the brand knowledge block below). Never mix in the other brand.
+
+        BRAND CONTEXT (both brands share the compliance spirit):
+        - USP Beloved Pets: "Supplement NOT a Medicine"; USP TOBYDIC: "Not medicine. Not
+          chemicals. Just gentle, natural daily support" — drops in food, no pill battles
         - Competitors I watch: Pet Honesty (premium-natural · main peer), Native Pet (vet-developed
           · most science-y), Zesty Paws (mass-market · we go premium NOT them), Bark Botanica
           (adaptogens · we steal their ingredient deep-dive format), Finn (premium minimal)
@@ -443,7 +459,7 @@ def generate_concepts(req: dict, save: bool = True) -> list[dict]:
         lessons_block += _insights(brand)
     except Exception:
         pass
-    system = _system_prompt() + lessons_block + examples
+    system = _system_prompt(brand) + lessons_block + examples
     out = call_claude(_user_prompt(req), system, timeout=180)
     parsed = _parse_json(out)
 
@@ -508,7 +524,7 @@ def generate_concepts_deep(req: dict, save: bool = False) -> list[dict]:
         extra += _insights(brand)
     except Exception:
         pass
-    system = _system_prompt() + extra + _load_corpus_examples(n=3, kind_hint="", brand=brand)
+    system = _system_prompt(brand) + extra + _load_corpus_examples(n=3, kind_hint="", brand=brand)
 
     angle_prompt = textwrap.dedent(f"""\
         Бриф: {base_ctx}
@@ -1187,9 +1203,9 @@ def brief_for_vika(title: str, pillar: str = "", brand: str = "BelovedPets",
         format_block = GRAPHIC_BRIEF_FORMAT
     try:
         from models.jack_lessons import render_rules_for_prompt as _rules
-        system = _system_prompt() + _rules(brand)
+        system = _system_prompt(brand) + _rules(brand)
     except Exception:
-        system = _system_prompt()
+        system = _system_prompt(brand)
     # Библиотека товаров и правило про вкус — в КАЖДОЕ ТЗ, это главная причина брака.
     try:
         from models.products import catalog_block, product_rule
@@ -1287,7 +1303,7 @@ def check_threads_post(text: str) -> list[str]:
 
 def threads_post(title: str, pillar: str = "", brand: str = "BelovedPets", extra: str = "") -> str:
     """Текст одного поста для Threads по теме из календаря (EN, готов к публикации)."""
-    system = _system_prompt()
+    system = _system_prompt(brand)
     try:
         from models.jack_lessons import render_rules_for_prompt as _rules
         system += _rules(brand)

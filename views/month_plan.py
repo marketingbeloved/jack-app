@@ -196,15 +196,17 @@ def _offer_saved_draft(brand: str, year: int, month: int, month_label: str) -> N
 
 def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
               owners, month_label, ideas=None) -> None:
-    from models import idea_bank
-    progress = st.progress(0.0, text="Джек читает ваши идеи, банк идей и прошлые месяцы…")
+    from models import idea_bank, plan_analytics
+    progress = st.progress(0.0, text="Джек разбирает ЦА и придумывает концепты месяца, "
+                                     "потом строго их проверяет (1-2 мин)…")
     try:
         bank = idea_bank.unused(brand)
     except Exception:
         bank = []
+    recent = plan_analytics.recent_titles(brand, gm)
     strategy = plan_generator.month_strategy(analysis, gy, gm, brand, extra,
                                              slots=plan_generator.free_slots(weeks),
-                                             ideas=ideas, bank=bank)
+                                             ideas=ideas, bank=bank, recent=recent)
     if strategy.get("error"):
         progress.empty()
         st.error(f"Не получилось собрать стратегию: {strategy['error']}")
@@ -214,7 +216,7 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
 
     name_map = {s: m.get("name", s) for s, m in owners.items()}
     posts: list[dict] = []
-    used: list[str] = [i["title"] for i in ideas or []]
+    used: list[str] = [i["title"] for i in ideas or []] + recent[:40]
     failed: list[int] = []
     bank_used: set[str] = set()
     errors: list[str] = []
@@ -250,6 +252,10 @@ def _generate(plan_generator, weeks, analysis, gy, gm, brand, market, extra,
         except Exception as e:  # noqa: BLE001
             errors.append(f"идеи команды: {type(e).__name__}: {str(e)[:150]}")
         posts.sort(key=lambda p: p.get("iso", ""))
+    history = plan_generator._history_titles(analysis, n=300, recent=recent)
+    for p in posts:
+        if not p.get("idea_id"):
+            p["similar_to"] = plan_generator.similar_to_history(p.get("title", ""), history)
     progress.empty()
 
     st.session_state["gen_month_posts"] = posts
@@ -292,6 +298,32 @@ def _preview(brand: str, owners: dict) -> None:
 
     if strategy.get("big_idea"):
         st.info(f"**Идея месяца.** {strategy['big_idea']}")
+    aud = [a for a in strategy.get("audience") or [] if isinstance(a, dict)]
+    if aud:
+        with st.expander("👥 ЦА этого месяца — кому и о чём говорим", expanded=False):
+            for a in aud[:4]:
+                st.markdown(f"- **{a.get('segment', '')}** — {a.get('moment', '')}  \n"
+                            f"  _{a.get('pain_or_desire', '')}_ · барьер: {a.get('barrier', '')}")
+    cons = [c for c in strategy.get("concepts") or [] if isinstance(c, dict)]
+    if cons:
+        rev = {r.get("concept"): r for r in strategy.get("review") or [] if isinstance(r, dict)}
+        st.markdown("**💡 Концепты месяца**")
+        for c in cons[:6]:
+            r = rev.get(c.get("name")) or {}
+            sc = r.get("scores") or {}
+            score = (f" · оценка {round(sum(v for v in sc.values() if isinstance(v, (int, float))) / max(len(sc), 1), 1)}/5"
+                     if sc else "")
+            with st.expander(f"{c.get('name', '')}{score}", expanded=False):
+                st.markdown(f"**Для кого:** {c.get('segment', '')}  \n"
+                            f"**Инсайт:** {c.get('insight', '')}  \n"
+                            f"**Идея:** {c.get('idea', '')}  \n"
+                            f"**Почему мы:** {c.get('why_us', '')}  \n"
+                            f"**Новизна:** {c.get('new_vs_history', '')}")
+                hooks = c.get("hooks") or []
+                if hooks:
+                    st.markdown("**Хуки:** " + " · ".join(f"“{h}”" for h in hooks if isinstance(h, str)))
+                if r.get("verdict"):
+                    st.caption(f"Ревью креативного директора: {r['verdict']}")
     if strategy.get("wishes"):
         st.markdown("**📌 Как закрыты ваши пожелания**\n"
                     + "\n".join(f"- {x}" for x in strategy["wishes"][:6]))
@@ -317,7 +349,8 @@ def _preview(brand: str, owners: dict) -> None:
         owner_name = owners.get(p["owner"], {}).get("name", p["owner"])
         tags = ("💡 ваша идея · " if p.get("idea_id") else "") + \
                ("🏦 из банка · " if p.get("bank_id") else "") + \
-               ("🧪 эксперимент · " if p.get("experiment") else "")
+               ("🧪 эксперимент · " if p.get("experiment") else "") + \
+               ("♻️ похоже на прошлое · " if p.get("similar_to") else "")
         head = (f'{p["date"]} · {tags}{_FMT_RU.get(p["format"], p["format"])} · {owner_name} — '
                 f'{p["title"]}')
         with st.expander(head, expanded=False):
@@ -331,6 +364,10 @@ def _preview(brand: str, owners: dict) -> None:
                 st.markdown(p["script"])
             if p.get("caption"):
                 st.markdown(f'**Подпись (EN):**\n\n{p["caption"]}')
+            if p.get("concept"):
+                st.caption(f'💡 Концепт: {p["concept"]}')
+            if p.get("similar_to"):
+                st.warning(f'♻️ Похоже на прошлый пост «{p["similar_to"]}» — проверь, не повтор ли.')
             if p.get("experiment"):
                 st.caption(f'🧪 Проверяем: {p["experiment"]}')
             if p.get("why"):

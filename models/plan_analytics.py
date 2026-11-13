@@ -113,6 +113,19 @@ def month_posts(brand: str, month: str) -> list[dict]:
     return out
 
 
+def recent_titles(brand: str, target_month: int, n_months: int = 3) -> list[str]:
+    """Темы последних n месяцев ПЕРЕД планируемым — включая текущий незаконченный и уже
+    расписанный следующий. collect() их в историю не берёт (там только завершённые месяцы),
+    и Джек, планируя январь, не видел ни ноябрь, ни декабрь — отсюда повторы."""
+    plan = _load_plan(brand)
+    months = [f"{(target_month - 1 - k) % 12 + 1:02d}" for k in range(1, n_months + 1)]
+    out: list[str] = []
+    for mm in months:                                  # ближайший месяц — первым
+        keys = sorted((k for k in plan if _month_of(k) == mm), key=lambda k: int(k.split(".")[0]))
+        out += [p.get("title", "") for k in keys for p in plan[k] or [] if p.get("title")]
+    return out
+
+
 def _load_plan(brand: str) -> dict:
     try:
         from views.content_plan import load_plan
@@ -274,7 +287,7 @@ def _metrics(brand: str, months: list[str], posts: list[dict]) -> dict:
 
 
 # ─── rendering ──────────────────────────────────────────────────────────────
-def as_prompt_block(a: dict) -> str:
+def as_prompt_block(a: dict, with_scripts: bool = True) -> str:
     """The analysis as plain text for the LLM prompt — facts only, no instructions."""
     if not a.get("total"):
         return "ИСТОРИЯ: постов за прошлые месяцы в базе нет."
@@ -338,10 +351,12 @@ def as_prompt_block(a: dict) -> str:
             lines.append(f"  - {p['date']} «{p['title']}» — гипотеза: {p['experiment']} → {res}")
 
     themes = [p["title"] for p in a["posts"]]
-    lines += ["", "ВСЕ темы за период (не повторять дословно, но видеть, что уже отработано):",
+    lines += ["", "ВСЕ темы за период (уже отработано — НЕ повторять ни дословно, ни другими словами):",
               "; ".join(themes[:80])]
 
-    scripts = [p for p in a["posts"] if p["brief"]][:12]
+    # Примеры старых ТЗ «пиши в этом же тоне» тянули планы в повтор прошлых месяцев —
+    # в планирование месяца их не даём (with_scripts=False), только в остальные места.
+    scripts = [p for p in a["posts"] if p["brief"]][:12] if with_scripts else []
     if scripts:
         lines += ["", f"НАШИ СОБСТВЕННЫЕ ТЗ ({a['briefs_written']} шт всего) — "
                       "пиши в этом же тоне и структуре:"]

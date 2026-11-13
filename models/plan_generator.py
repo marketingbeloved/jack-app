@@ -368,26 +368,113 @@ def _month_ru(month: int) -> str:
             "август", "сентябрь", "октябрь", "ноябрь", "декабрь"][month]
 
 
+# ─── Поводы и сезон США для pet-ниши (решение Марии 2026-11-13) ──────────────
+# Даты — из общеизвестного календаря pet-observances США. Плавающие дни помечены «≈».
+# Перед постом «к дню X» дату стоит перепроверить.
+US_PET_CALENDAR = {
+    1: ["National Train Your Dog Month (весь январь)", "Walk Your Pet Day — 21.01",
+        "новогодние обещания, «new year, new routine»"],
+    2: ["Pet Dental Health Month (весь февраль)", "Valentine's Day — 14.02",
+        "Love Your Pet Day — 20.02", "National Dog Biscuit Day — 23.02"],
+    3: ["National Puppy Day — 23.03", "весенняя линька начинается"],
+    4: ["National Pet Day — 11.04", "сезон блох и клещей стартует"],
+    5: ["National Pet Month (май, США)", "Mother's Day (2-е вс мая) — «dog/cat mom»"],
+    6: ["Adopt a Shelter Cat Month (июнь)", "Father's Day (3-е вс июня) — «dog dad»",
+        "Take Your Dog to Work Day (≈ пятница после Father's Day)", "жара, путешествия"],
+    7: ["4th of July — фейерверки и стресс питомцев", "Lost Pet Prevention Month (июль)",
+        "жара: вода, прогулки"],
+    8: ["International Cat Day — 08.08", "National Dog Day — 26.08", "back to school — питомец скучает"],
+    9: ["осенняя рутина после лета", "Animal Pain Awareness Month (сентябрь)"],
+    10: ["Adopt a Shelter Dog Month (октябрь)", "National Pet Wellness Month (октябрь)",
+         "National Cat Day — 29.10", "Halloween — 31.10 (костюмы, сладости нельзя)"],
+    11: ["Adopt a Senior Pet Month (ноябрь)", "Thanksgiving (4-й чт ноября) — что нельзя со стола",
+         "Black Friday / Cyber Monday"],
+    12: ["праздники, гости и стресс", "подарки питомцам", "зима: сухая кожа, меньше прогулок"],
+}
+
+
+def _calendar_block(month: int) -> str:
+    items = US_PET_CALENDAR.get(month) or []
+    return ("ПОВОДЫ И СЕЗОН МЕСЯЦА (США, pet-ниша; используй, где ложится на концепт):\n"
+            + "\n".join(f"  • {x}" for x in items)) if items else ""
+
+
+_STRATEGY_JSON = """{
+  "big_idea": "1-2 фразы — про что месяц для нашей ЦА и чем он отличается от прошлых",
+  "audience": [{"segment": "кто именно (не «владельцы питомцев», а «хозяин кота-привереды, который…»)",
+                 "moment": "в какой ситуации этого месяца он сейчас",
+                 "pain_or_desire": "что его волнует — его же словами, по-английски, как он сказал бы в комментах",
+                 "barrier": "что мешает купить/поверить (таблетки, недоверие к добавкам, цена…)"}],
+  "concepts": [{"name": "короткое имя концепта / рубрики",
+                 "segment": "для какого сегмента из audience",
+                 "insight": "человеческая правда: «Я … , но …» — конкретно, узнаваемо",
+                 "idea": "сама креативная мысль в 1-2 фразах",
+                 "why_us": "почему это может сказать ТОЛЬКО наш бренд: связь с позиционированием/УТП",
+                 "products": ["товары из базы, которые естественно ложатся"],
+                 "formats": ["reel", "carousel", "static", "animation"],
+                 "hooks": ["2-3 хука на английском"],
+                 "new_vs_history": "чем отличается от того, что уже было в истории (назови похожее, если есть)"}],
+  "team_ideas": ["что ты увидел в идеях команды и как концепты их развивают"],
+  "wishes": ["как закрыт каждый пункт из «ГЛАВНОЕ ОТ КОМАНДЫ»"],
+  "bank_ids": ["id идей из банка, которые берём в этот месяц"],
+  "experiments": [{"hypothesis": "если …, то …", "metric": "сохранения"}],
+  "keep": ["до 3 пунктов: что из прошлых месяцев сработало по цифрам и повторяем"],
+  "drop": ["только провалы по цифрам; нет цифр — пустой список"],
+  "new_bets": ["что нового пробуем в этом месяце"],
+  "format_mix": {"reel": 3, "carousel": 2, "static": 2, "animation": 2},
+  "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
+  "data_gaps": ["чего не хватает, чтобы планировать точнее"]
+}"""
+
+
+def _history_titles(analysis: dict, n: int = 80, recent: list[str] | None = None) -> list[str]:
+    """Последние месяцы перед планируемым (recent) + завершённая история, без дублей."""
+    seen, out = set(), []
+    for t in (recent or []) + [p["title"] for p in (analysis.get("posts") or []) if p.get("title")][::-1]:
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:n]
+
+
+def _recent_block(recent: list[str]) -> str:
+    if not recent:
+        return ""
+    return ("ПОСЛЕДНИЕ 3 МЕСЯЦА ПЕРЕД ПЛАНИРУЕМЫМ (включая уже расписанные) — эти темы, рубрики "
+            "и заходы НЕ ПОВТОРЯТЬ ни дословно, ни другими словами:\n" + "; ".join(recent[:90]))
+
+
 def month_strategy(analysis: dict, year: int, month: int, brand: str = "BelovedPets",
                    extra: str = "", slots: int = 0, ideas: list[dict] | None = None,
-                   bank: list[dict] | None = None) -> dict:
-    """One call: the month's angle, what to push, what to drop. Returns a dict, never raises."""
+                   bank: list[dict] | None = None, recent: list[str] | None = None) -> dict:
+    """Стратегия месяца от ЦА и позиционирования, а не от прошлых постов. Никогда не падает.
+
+    Два прохода (решение Марии 2026-11-13, «идеи слабые и крутятся вокруг прошлого месяца»):
+      1. Бренд-стратег: сегменты ЦА и их ситуация в этом месяце → 4-5 маркетинговых
+         концептов (инсайт, идея, почему это наш бренд, чем ново относительно истории).
+      2. Строгий креативный директор: оценивает каждый концепт и заменяет слабые.
+    История прошлых месяцев — только как цифры и список уже отработанных тем.
+    """
     from models.plan_analytics import as_prompt_block
 
     slots = slots or sum(len(w) for w in month_skeleton(year, month, brand=brand))
     ideas = ideas or []
-    system = _system_prompt() + _rules_block(brand)
+    system = _system_prompt(brand) + _rules_block(brand)
     prompt = f"""\
-Ты планируешь Instagram-контент {brand} на {_month_ru(month)} {year}.
+Ты — бренд-стратег и креативный директор {brand}. Планируешь Instagram на {_month_ru(month)} {year}.
+Думай как маркетолог: от ЧЕЛОВЕКА и его ситуации в этом месяце → к инсайту → к идее, которую
+может сказать только наш бренд. НЕ от прошлых постов.
 
 {_wishes_block(extra)}
+
+{_calendar_block(month)}
 
 Постим 3 раза в неделю: {posting_days_ru(brand)}. Тебе писать {slots} новых постов
 (идеи команды ниже уже стоят в плане и в это число не входят) — сумма чисел в `format_mix`
 должна быть ровно {slots}.
 Исполнители — только Вика (графика: фото от блогера, static, carousel) и Дина (видео: reel,
-animation), нагрузка 50/50 (решение Марии). Подбирай `format_mix` так, чтобы
-вместе с еженедельным «фото от блогера» графики и видео в месяце было примерно поровну.
+animation), нагрузка 50/50. Подбирай `format_mix` так, чтобы вместе с еженедельным
+«фото от блогера» графики и видео в месяце было примерно поровну.
 
 {team_ideas_block(ideas)}
 
@@ -395,47 +482,118 @@ animation), нагрузка 50/50 (решение Марии). Подбирай
 
 {_competitors_block()}
 
-ИСТОРИЯ — это ФОН: что уже было и что сработало по цифрам. НЕ шаблон для копирования.
-{as_prompt_block(analysis)}
+{_recent_block(recent or [])}
 
-Задача: дай СТРАТЕГИЮ месяца, ещё без конкретных постов. Порядок важности: пожелания
-команды → идеи команды в плане и в банке → новые заходы (конкуренты, тренды, эксперименты)
-→ и только потом история.
-БАНК ИДЕЙ: выбери из банка 2-4 идеи, которые лучше всего ложатся на месяц, и верни их id в
-`bank_ids` (если банк пуст — пустой список).
-ЭКСПЕРИМЕНТЫ: придумай 2-3 гипотезы, которые мы ещё НЕ проверяли (новый формат, новый тип
-хука, новая тема, новая механика вовлечения). Каждая — одной фразой «если …, то …» и с
-метрикой, по которой поймём результат (просмотры / сохранения / комментарии / репосты).
-Посмотри в истории блок «ПРОШЛЫЕ ЭКСПЕРИМЕНТЫ»: что сработало — развивай, что нет — не повторяй.
-Если цифр Instagram нет — так и скажи в поле `data_gaps`, не выдумывай числа.
-«Идея команды (формат в названии не указан)» в истории — это НЕ брак и не «прочее», а темы,
-придуманные командой. Их не убираем, а анализируем.
-В `drop` — только то, что ПРОВАЛИЛОСЬ по цифрам Instagram. Нет цифр — `drop` пустой.
-НЕ ХОДИ ПО КРУГУ (решение Марии): прошлые месяцы — фон, а не шаблон. Минимум ПОЛОВИНА
-постов месяца — новые форматы, идеи и темы, которых в истории выше НЕТ. `keep` — не больше
-3 пунктов. Новое бери из ресёрча ЦА, трендов и механик, которые у нас уже сработали
-(участие, награда, реакция питомца), — но в новой упаковке, а не повтором старых постов.
+ИСТОРИЯ — только ФОН: цифры и список уже отработанных тем. Это НЕ источник идей.
+{as_prompt_block(analysis, with_scripts=False)}
+
+КАК ДУМАТЬ (по шагам, результат — в JSON):
+1. ЦА. Опиши 3 сегмента нашей ЦА — из позиционирования бренда и знаний о ЦА в системном
+   блоке, а не из головы. Для каждого: ситуация ИМЕННО в этом месяце (сезон, поводы выше),
+   что волнует его словами, что мешает купить.
+2. КОНЦЕПТЫ. Придумай 4-5 маркетинговых концептов (рубрик/кампаний месяца). Каждый:
+   • инсайт — человеческая правда, узнаваемая ситуация («Я знаю, что ей нужны витамины,
+     но каждая таблетка — это битва»), а не общее «хозяева заботятся о питомцах»;
+   • почему это НАШ бренд — связь с УТП и позиционированием. Если концепт мог бы
+     запостить любой бренд кормов — он слабый, переделай;
+   • новизна — сравни со списком тем в истории и назови похожее, если есть. Повтор
+     прошлой рубрики другими словами запрещён;
+   • производство — простое: графика Вики или 3 простые ИИ-сцены Дины.
+3. Концепты должны покрывать разные сегменты и цели: вовлечение, продажа, вирусность.
+4. Пожелания команды и её идеи — встраиваются в концепты, не теряются.
+5. БАНК ИДЕЙ: выбери 2-4 идеи и верни их id в `bank_ids` (банк пуст — пустой список).
+6. ЭКСПЕРИМЕНТЫ: 2-3 гипотезы «если …, то …» с метрикой — то, что мы ещё не проверяли.
+   Блок «ПРОШЛЫЕ ЭКСПЕРИМЕНТЫ» в истории: сработало — развивай, нет — не повторяй.
+7. `drop` — только провалы по цифрам Instagram. Нет цифр — пустой список, и скажи об этом
+   в `data_gaps`. Чисел не выдумывай.
 
 Верни ЧИСТЫЙ JSON без обёрток:
-{{
-  "big_idea": "1-2 фразы — про что месяц, чем отличается от прошлого",
-  "team_ideas": ["что ты увидел в идеях команды (темы, товары, углы) и как новые посты их развивают"],
-  "wishes": ["как закрыт каждый пункт из «ГЛАВНОЕ ОТ КОМАНДЫ»"],
-  "bank_ids": ["id идей из банка, которые берём в этот месяц"],
-  "experiments": [{{"hypothesis": "если …, то …", "metric": "сохранения"}}],
-  "keep": ["до 3 пунктов: что из прошлых месяцев работает и повторяем — с обоснованием из данных"],
-  "drop": ["только провалы по цифрам; нет цифр — пустой список"],
-  "new_bets": ["4-6 новых форматов/идей/тем, которых у нас ещё не было — на них минимум половина постов"],
-  "format_mix": {{"reel": 3, "carousel": 2, "static": 2, "animation": 2}},
-  "weekly_themes": ["тема недели 1", "тема недели 2", "тема недели 3", "тема недели 4", "тема недели 5"],
-  "data_gaps": ["чего не хватает, чтобы планировать точнее"]
-}}
+{_STRATEGY_JSON}
 """
-    out = call_claude(prompt, system, timeout=180)
+    out = call_claude(prompt, system, timeout=240)
     parsed = _parse_json(out)
     if parsed.get("error"):
         return {"error": parsed["error"], "raw": parsed.get("raw", "")}
+    return _review_strategy(parsed, analysis, brand, month, extra, recent) or parsed
+
+
+def _review_strategy(draft: dict, analysis: dict, brand: str, month: int, extra: str,
+                     recent: list[str] | None = None) -> dict | None:
+    """Второй проход: строгий креативный директор оценивает концепты и меняет слабые.
+    None — ревью не получилось, остаётся черновик стратегии."""
+    titles = "; ".join(_history_titles(analysis, n=120, recent=recent))
+    prompt = f"""\
+Ты — строгий креативный директор и бренд-стратег {brand}. Перед тобой черновик стратегии
+Instagram на {_month_ru(month)} от твоего SMM. Твоя задача — сделать её СИЛЬНЕЕ.
+
+{_wishes_block(extra)}
+
+ТЕМЫ, КОТОРЫЕ У НАС УЖЕ БЫЛИ (повторять нельзя, даже другими словами):
+{titles or '(истории нет)'}
+
+ЧЕРНОВИК:
+{json.dumps(draft, ensure_ascii=False, indent=2)[:9000]}
+
+Оцени КАЖДЫЙ концепт от 1 до 5 по критериям:
+  • insight — конкретная узнаваемая ситуация ЦА, а не общая забота;
+  • brand — мог сказать только наш бренд (УТП, позиционирование), а не любой;
+  • novelty — нет в списке прошлых тем, не пересказ старой рубрики;
+  • simple — делается графикой или 3 простыми ИИ-сценами;
+  • stopping — хук остановит скролл.
+Концепт со средним ниже 4 или с любой оценкой 2 и ниже — ЗАМЕНИ на более сильный (новый
+концепт по той же схеме полей). Сильные — можешь усилить инсайт и хуки.
+Проверь, что пожелания команды закрыты, а концепты покрывают разные сегменты ЦА.
+
+Верни ЧИСТЫЙ JSON без обёрток: ПОЛНУЮ исправленную стратегию в той же схеме, что черновик,
+плюс поле "review": [{{"concept": "имя", "scores": {{"insight": 4, "brand": 5, "novelty": 3,
+"simple": 5, "stopping": 4}}, "verdict": "оставлен / усилен / заменён на «…» — почему"}}].
+"""
+    try:
+        parsed = _parse_json(call_claude(prompt, _system_prompt(brand) + _rules_block(brand), timeout=240))
+    except Exception:
+        return None
+    if parsed.get("error") or not parsed.get("concepts"):
+        return None
+    for k, v in draft.items():                 # то, что ревьюер забыл вернуть, — из черновика
+        parsed.setdefault(k, v)
     return parsed
+
+
+def _concepts_block(strategy: dict) -> str:
+    cs = [c for c in (strategy.get("concepts") or []) if isinstance(c, dict)]
+    if not cs:
+        return ""
+    lines = ["КОНЦЕПТЫ МЕСЯЦА — каждый пост (кроме «фото от блогера» и идей команды) вырастает "
+             "из ОДНОГО концепта; имя концепта ставь в поле `concept`. Держи инсайт и «почему мы»:"]
+    for c in cs[:6]:
+        lines.append(f"  • «{_s(c.get('name'))}» — для: {_s(c.get('segment'))}. Инсайт: {_s(c.get('insight'))}. "
+                     f"Идея: {_s(c.get('idea'))}. Почему мы: {_s(c.get('why_us'))}. "
+                     f"Товары: {_s(c.get('products'))}. Хуки: {_s(c.get('hooks'))}")
+    return "\n".join(lines)
+
+
+_STOP = {"the", "and", "for", "with", "your", "you", "our", "что", "как", "для", "это", "pet", "pets",
+         "dog", "dogs", "cat", "cats", "фото", "блогера", "от", "reel", "рилс"}
+
+
+def _words(t: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zа-яё0-9']+", (t or "").lower()) if len(w) > 2 and w not in _STOP}
+
+
+def similar_to_history(title: str, history: list[str]) -> str:
+    """Название прошлого поста, на которое новый похож (≥ половина значимых слов), или ""."""
+    a = _words(title)
+    if len(a) < 2:
+        return ""
+    best, score = "", 0.0
+    for h in history:
+        b = _words(h)
+        if not b:
+            continue
+        sc = len(a & b) / min(len(a), len(b))
+        if sc > score:
+            best, score = h, sc
+    return best if score >= 0.5 else ""
 
 
 def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
@@ -480,23 +638,25 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
                    f'[{_FORMAT_LABELS.get(i["format"], i["format"])}]. Не пиши для этого дня.'
                    for s in fixed for i in s["fixed"]]
 
-    system = _system_prompt() + _rules_block(brand)
+    system = _system_prompt(brand) + _rules_block(brand)
     prompt = f"""\
 Пишешь НЕДЕЛЮ {week_no} из {total_weeks} контент-плана {brand} на {_month_ru(int(week_slots[0]["date"].split(".")[1]))}.
 
 {_wishes_block(extra)}
 
 СТРАТЕГИЯ МЕСЯЦА (её же и держись):
-{json.dumps(strategy, ensure_ascii=False, indent=2)[:2500]}
+{json.dumps({k: v for k, v in strategy.items() if k not in ("concepts", "review", "audience")}, ensure_ascii=False, indent=2)[:2500]}
 
 Тема этой недели: {theme or '(выведи сам из стратегии)'}
 
 {_bank_prompt(bank, week=True)}
 
+{_concepts_block(strategy)}
+
 {_experiments_block(strategy)}
 
 ИСТОРИЯ (кратко, ФОН — не шаблон; не повторяй структуру прошлых постов):
-{as_prompt_block(analysis)[:2500]}
+{as_prompt_block(analysis, with_scripts=False)[:2500]}
 
 {_catalog_block(brand, market=market)}
 {team_ideas_block(ideas or [])}
@@ -519,6 +679,7 @@ def generate_week(week_slots: list[dict], strategy: dict, analysis: dict,
     "pillar": "Product Highlight|Community / UGC|Education|Trend|Promo / Discount",
     "product": "какой SKU в кадре", "hook": "English hook",
     "cover": "обложка (только видео)", "script": "надписи / сцены", "caption": "English caption",
+    "concept": "имя концепта месяца, из которого вырос пост",
     "bank_id": "id идеи из банка, если пост из неё вырос, иначе пусто",
     "experiment": "гипотеза эксперимента, если пост её проверяет, иначе пусто",
     "why": "обоснование из данных"}}
@@ -588,7 +749,7 @@ def develop_ideas(ideas: list[dict], strategy: dict, year: int, *, brand: str = 
     "why": "как пост раскрывает идею команды"}}
 ]}}
 """
-        parsed = _parse_json(call_claude(prompt, _system_prompt() + _rules_block(brand), timeout=300))
+        parsed = _parse_json(call_claude(prompt, _system_prompt(brand) + _rules_block(brand), timeout=300))
         if parsed.get("error"):
             continue
         got = {str(p.get("idea_id")): p for p in parsed.get("posts") or [] if isinstance(p, dict)}
@@ -713,6 +874,7 @@ def _normalise(posts: list[dict], slots: list[dict],
             "hook": (_s(post.get("hook"))).strip(),
             "cover": (_s(post.get("cover"))).strip(),
             "bank_id": str(_s(post.get("bank_id"))).strip(),
+            "concept": _s(post.get("concept")).strip()[:80],
             "experiment": (_s(post.get("experiment"))).strip()[:200],
             "script": _clean_md(_s(post.get("script"))),
             "caption": limit_hashtags((_s(post.get("caption"))).strip()),

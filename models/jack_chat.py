@@ -15,7 +15,7 @@ from models.jack_engine import _brand_context, _load_corpus_examples
 
 
 def chat_system_prompt(brand: str = "BelovedPets") -> str:
-    brand_ctx = _brand_context()
+    brand_ctx = _brand_context(brand)
     try:
         from models.jack_lessons import render_rules_for_prompt
         rules = render_rules_for_prompt(brand)
